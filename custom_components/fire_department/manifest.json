@@ -1,10 +1,12 @@
 {
   "domain": "fire_department",
-  "name": "Fire Department Info",
+  "name": "Fire Department Austria",
+  "codeowners": ["@acdcnow"],
   "config_flow": true,
-  "documentation": "https://github.com/acdcnow/fire-department",
-  "issue_tracker": "https://github.com/acdcnow/fire-department/issues",
-  "requirements": ["beautifulsoup4"],
+  "documentation": "https://github.com/acdcnow/fire-department-for-Home-Assistant",
+  "integration_type": "service",
   "iot_class": "cloud_polling",
-  "version": "2.2.0"
+  "issue_tracker": "https://github.com/acdcnow/fire-department-for-Home-Assistant/issues",
+  "requirements": [],
+  "version": "3.0.0-beta.1"
 }

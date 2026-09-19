@@ -1,39 +1,25 @@
 type: markdown
-title: 🚒 Deployed Brigades
+title: 🚒 Deployed brigades
 content: >
-  {% set entity_id = 'sensor.fire_department_info_eingesetzte_feuerwehren' %}
+  {% set entity = 'sensor.fire_department_deployed_fire_brigades' %}
 
-  <b>Total Deployed:</b> {{ states(entity_id) }}
+  **Brigades in action:** {{ states(entity) }}
 
-  <br>
+  {% set missions = state_attr(entity, 'incidents') %}
 
-  <table>
-
-  <tr><th align="left">Date</th><th align="left">Time</th><th
-  align="left">Department</th><th align="left">Type</th></tr>
-
-  {% set data = state_attr(entity_id, 'data_list') %}
-
-  {% if states(entity_id) not in ['unavailable', 'unknown'] and data %}
-
-  {% for row in data %}
-
+  {% if missions %}
+  <table width="100%">
+  <tr><th align="left">Since</th><th align="left">Brigade</th><th align="left">Alert</th><th align="left">Town</th></tr>
+  {% for m in missions %}
   <tr>
-
-  <td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{ row[4]
-  }}</td>
-
+    <td style="border-left: 6px solid {{ m.color or '#9ca3af' }}; padding-left: 6px">{{ m.time or m.age or m.date }}</td>
+    <td>{{ m.brigade or m.municipality }}{% if m.brigade_code %} ({{ m.brigade_code }}){% endif %}</td>
+    <td>{{ m.keyword or '' }} {{ m.type }}</td>
+    <td>{{ m.municipality }}</td>
   </tr>
-
   {% endfor %}
-
-  {% else %}
-
-  <tr><td colspan="4">No brigades currently deployed.</td></tr>
-
-  {% endif %}
-
   </table>
+  {% else %}<i>No brigades deployed right now.</i>{% endif %}
 grid_options:
   columns: 18
   rows: auto

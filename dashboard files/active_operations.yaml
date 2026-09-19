@@ -1,113 +1,93 @@
 type: grid
 cards:
   - type: markdown
-    title: 🔥 Active Operations
+    title: 🔥 Running missions
     content: >
-      <table>
+      {% set entity = 'sensor.fire_department_active_operations' %}
 
-      <tr><th align="left">Date</th><th align="left">Time</th><th
-      align="left">District</th><th align="left">Location</th><th
-      align="left">Type</th></tr>
+      {% set missions = state_attr(entity, 'incidents') %}
 
-      {% set entity_id = 'sensor.fire_department_info_aktuelle_einsatze' %}
-
-      {% set data = state_attr(entity_id, 'data_list') %}
-
-      {% if states(entity_id) not in ['unavailable', 'unknown'] and data %}
-
-      {% for row in data %}
-
+      {% if missions %}
+      <table width="100%">
+      <tr><th align="left">Since</th><th align="left">Alert</th><th align="left">Town</th><th align="left">Type</th></tr>
+      {% for m in missions %}
       <tr>
-
-      <td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{
-      row[3] }}</td><td>{{ row[4] }}</td>
-
+        <td style="border-left: 6px solid {{ m.color or '#9ca3af' }}; padding-left: 6px">{{ m.time or m.age or m.date }}</td>
+        <td>{{ m.keyword or '' }}</td>
+        <td>{{ m.municipality }}{% if m.district %} ({{ m.district }}){% endif %}</td>
+        <td>{{ m.type }}</td>
       </tr>
-
       {% endfor %}
-
-      {% else %}
-
-      <tr><td colspan="5">No active operations.</td></tr>
-
-      {% endif %}
-
       </table>
+      {% else %}<i>No running missions right now.</i>{% endif %}
     grid_options:
       columns: 18
       rows: auto
   - type: markdown
-    title: 🚒 Deployed Brigades
+    title: 🚒 Deployed brigades
     content: >
-      {% set entity_id = 'sensor.fire_department_info_eingesetzte_feuerwehren'
-      %}
+      {% set entity = 'sensor.fire_department_deployed_fire_brigades' %}
 
-      <b>Total Deployed:</b> {{ states(entity_id) }}
+      **Brigades in action:** {{ states(entity) }}
 
-      <br>
+      {% set missions = state_attr(entity, 'incidents') %}
 
-      <table>
-
-      <tr><th align="left">Date</th><th align="left">Time</th><th
-      align="left">Department</th><th align="left">Type</th></tr>
-
-      {% set data = state_attr(entity_id, 'data_list') %}
-
-      {% if states(entity_id) not in ['unavailable', 'unknown'] and data %}
-
-      {% for row in data %}
-
+      {% if missions %}
+      <table width="100%">
+      <tr><th align="left">Since</th><th align="left">Brigade</th><th align="left">Alert</th></tr>
+      {% for m in missions %}
       <tr>
-
-      <td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{
-      row[4] }}</td>
-
+        <td style="border-left: 6px solid {{ m.color or '#9ca3af' }}; padding-left: 6px">{{ m.time or m.age or m.date }}</td>
+        <td>{{ m.brigade or m.municipality }}{% if m.brigade_code %} ({{ m.brigade_code }}){% endif %}</td>
+        <td>{{ m.keyword or '' }} {{ m.type }}</td>
       </tr>
-
       {% endfor %}
-
-      {% else %}
-
-      <tr><td colspan="4">No brigades currently deployed.</td></tr>
-
-      {% endif %}
-
       </table>
+      {% else %}<i>No brigades deployed right now.</i>{% endif %}
     grid_options:
       columns: 18
       rows: auto
   - type: markdown
-    title: 🏁 Completed Missions
+    title: 🕓 Mission history (24 h)
     content: >
-      <table>
+      {% set entity = 'sensor.fire_department_completed_missions' %}
 
-      <tr><th align="left">Date</th><th align="left">Time</th><th
-      align="left">District</th><th align="left">Location</th><th
-      align="left">Type</th></tr>
+      **Finished missions:** {{ states(entity) }}{% if state_attr(entity, 'average_duration') %} · Ø {{ state_attr(entity, 'average_duration') }}{% endif %}
 
-      {% set entity_id = 'sensor.fire_department_info_beendete_einsatze' %}
+      {% set missions = state_attr(entity, 'incidents') %}
 
-      {% set data = state_attr(entity_id, 'data_list') %}
-
-      {% if states(entity_id) not in ['unavailable', 'unknown'] and data %}
-
-      {% for row in data %}
-
+      {% if missions %}
+      <table width="100%">
+      <tr><th align="left">Time</th><th align="left">Alert</th><th align="left">Town</th><th align="left">Duration</th></tr>
+      {% for m in missions %}
       <tr>
-
-      <td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{
-      row[3] }}</td><td>{{ row[4] }}</td>
-
+        <td style="border-left: 6px solid {{ m.color or '#9ca3af' }}; padding-left: 6px">{{ m.time or m.date }}</td>
+        <td>{{ m.keyword or '' }}</td>
+        <td>{{ m.municipality }}{% if m.district %} ({{ m.district }}){% endif %}</td>
+        <td>{{ m.duration_minutes ~ ' min' if m.duration_minutes else '-' }}</td>
       </tr>
-
       {% endfor %}
+      </table>
+      {% else %}<i>No finished missions in the window.</i>{% endif %}
+    grid_options:
+      columns: 18
+      rows: auto
+  - type: markdown
+    title: 🧭 At a glance
+    content: >
+      {% set entity = 'sensor.fire_department_active_operations' %}
 
-      {% else %}
+      {% set missions = state_attr(entity, 'incidents') %}
 
-      <tr><td colspan="5">No history data.</td></tr>
+      **Missions:** {{ states(entity) }} · **Brigades:** {{
+      states('sensor.fire_department_deployed_fire_brigades') }} · **Running since:** {{
+      state_attr(entity, 'longest_running').age if state_attr(entity, 'longest_running') else '-' }}
 
-      {% endif %}
-        </table>
+      {% set colors = state_attr(entity, 'color_legend') or {} %}
+
+      {% for name, color in colors.items() %}
+      <span style="display:inline-block;background:{{ color }};color:#fff;border-radius:4px;padding:1px 6px;margin-right:4px">{{ name }}</span>
+      {% endfor %}
     grid_options:
       columns: 18
       rows: auto

@@ -2,31 +2,157 @@
   "config": {
     "step": {
       "user": {
-        "title": "Bundesland wählen",
-        "description": "Wählen Sie das Bundesland und das Aktualisierungsintervall.",
+        "title": "Feuerwehr Österreich einrichten",
+        "description": "Bundesland wählen und festlegen, wie oft die Einsatzliste abgefragt werden soll.",
         "data": {
           "name": "Name",
           "region": "Bundesland",
-          "update_interval": "Aktualisierung (Minuten)"
+          "update_interval": "Aktualisierung (Minuten)",
+          "color_scheme": "Farbschema",
+          "filter_categories": "Nur diese Einsatzarten"
         }
       }
+    },
+    "abort": {
+      "already_configured": "Dieses Bundesland ist bereits eingerichtet."
+    },
+    "error": {
+      "invalid_url": "Die Adresse muss mit http:// oder https:// beginnen.",
+      "invalid_parser": "Unbekannter Parser."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Einstellungen",
+        "title": "Feuerwehr Österreich",
         "menu_options": {
-          "global_settings": "Intervall ändern",
-          "add_page": "Neue Seite hinzufügen",
-          "remove_page": "Seite entfernen"
+          "general": "Allgemeine Einstellungen",
+          "sources": "Datenquellen",
+          "add_page": "Eigene Quelle hinzufügen",
+          "remove_page": "Eigene Quelle entfernen"
         }
       },
-      "global_settings": {
-        "title": "Aktualisierungsrate",
+      "general": {
+        "title": "Allgemeine Einstellungen",
+        "description": "Jede Änderung speichert die Einstellungen und lädt die Integration neu.",
         "data": {
-          "update_interval": "Aktualisierung (Minuten)"
+          "update_interval": "Aktualisierung (Minuten)",
+          "color_scheme": "Farbschema",
+          "filter_categories": "Nur diese Einsatzarten",
+          "max_items": "Einsätze in den Attributen (0 = keine)"
         }
+      },
+      "sources": {
+        "title": "Datenquellen",
+        "description": "Wähle, welche Seite welchen Sensor versorgt. \u201eNicht verwenden\u201c entfernt den Sensor.",
+        "data": {
+          "active_operations": "Aktuelle Einsätze",
+          "deployed_fire_brigade": "Eingesetzte Feuerwehren",
+          "completed_missions": "Beendete Einsätze"
+        }
+      },
+      "add_page": {
+        "title": "Eigene Quelle hinzufügen",
+        "description": "Jede Tabelle im Format der unterstützten Seiten kann so gelesen werden.",
+        "data": {
+          "name": "Name",
+          "url": "Adresse (URL)",
+          "parser": "Parser",
+          "kind": "Sensor",
+          "window": "Zeitfenster",
+          "filter": "Zeilen"
+        }
+      },
+      "remove_page": {
+        "title": "Eigene Quelle entfernen",
+        "data": {
+          "pages_to_remove": "Zu entfernende Quellen"
+        }
+      }
+    },
+    "abort": {
+      "no_pages": "Keine eigene Quelle konfiguriert."
+    },
+    "error": {
+      "invalid_url": "Die Adresse muss mit http:// oder https:// beginnen.",
+      "invalid_parser": "Unbekannter Parser."
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "lower_austria": "Niederösterreich (WASTL)",
+        "upper_austria": "Oberösterreich (LFV \u00d6)",
+        "styria": "Steiermark (LFV Steiermark)",
+        "vienna": "Wien",
+        "salzburg": "Salzburg",
+        "burgenland": "Burgenland",
+        "carinthia": "Kärnten",
+        "tyrol": "Tirol",
+        "vorarlberg": "Vorarlberg"
+      }
+    },
+    "color_scheme": {
+      "options": {
+        "severity": "Nach Dringlichkeit (hoch/mittel/gering)",
+        "category": "Nach Einsatzart (Brand/Technik/\u2026)",
+        "source": "Nach Bundesland",
+        "source_color": "Farben der Quellseite",
+        "none": "Keine Farben"
+      }
+    },
+    "category": {
+      "options": {
+        "fire": "Brand (B)",
+        "technical": "Technik (T)",
+        "hazardous": "Gefahrgut (S/G)",
+        "exercise": "Übung (U)",
+        "special": "Sonder (SOF)",
+        "other": "Sonstiges"
+      }
+    },
+    "source": {
+      "options": {
+        "none": "Nicht verwenden",
+        "noe_active": "Niederösterreich \u2013 aktuelle Einsätze (WASTL)",
+        "noe_units": "Niederösterreich \u2013 eingesetzte Feuerwehren (WASTL)",
+        "noe_history": "Niederösterreich \u2013 Einsatzhistorie (WASTL)",
+        "ooe_active": "Oberösterreich \u2013 aktuelle Einsätze (LFV \u00d6)",
+        "ooe_units": "Oberösterreich \u2013 eingesetzte Feuerwehren (LFV \u00d6)",
+        "ooe_history": "Oberösterreich \u2013 letzte 24 Stunden (LFV \u00d6)",
+        "stmk_active": "Steiermark \u2013 laufende Einsätze (LFV)",
+        "stmk_units": "Steiermark \u2013 eingesetzte Feuerwehren (LFV)",
+        "stmk_history": "Steiermark \u2013 beendete Einsätze, 24 h (LFV)"
+      }
+    },
+    "parser": {
+      "options": {
+        "wastl_incidents": "WASTL-Einsatztabelle ([Symbol] Leitstelle | Gemeinde | Einsatzart | Zeit)",
+        "wastl_units": "WASTL-Feuerwehrtabelle (Nummer + Gemeinde | Einsatzart | Zeit)",
+        "ooe": "Oberösterreichische Einsatzliste",
+        "stmk_csv": "Steiermark CSV (semikolongetrennt)"
+      }
+    },
+    "kind": {
+      "options": {
+        "active_operations": "Aktuelle Einsätze",
+        "deployed_fire_brigade": "Eingesetzte Feuerwehren",
+        "completed_missions": "Beendete Einsätze"
+      }
+    },
+    "window": {
+      "options": {
+        "live": "Live",
+        "24h": "Letzte 24 Stunden",
+        "month": "Monat",
+        "custom": "Unbekannt"
+      }
+    },
+    "row_filter": {
+      "options": {
+        "none": "Alle Zeilen",
+        "ongoing": "Nur laufende",
+        "closed": "Nur beendete"
       }
     }
   },
@@ -35,27 +161,9 @@
       "active_operations": { "name": "Aktuelle Einsätze" },
       "deployed_fire_brigade": { "name": "Eingesetzte Feuerwehren" },
       "completed_missions": { "name": "Beendete Einsätze" }
-    }
-  },
-  "selector": {
-    "region": {
-      "options": {
-        "lower_austria": "Niederösterreich (NÖ)",
-        "upper_austria": "Oberösterreich (OÖ)",
-        "vienna": "Wien",
-        "styria": "Steiermark",
-        "salzburg": "Salzburg",
-        "burgenland": "Burgenland",
-        "carinthia": "Kärnten",
-        "tyrol": "Tirol",
-        "vorarlberg": "Vorarlberg"
-      }
     },
-    "parser_type": {
-      "options": {
-        "incidents": "Einsatzliste (Aktuell/Historie)",
-        "departments": "Liste Aktiver Feuerwehren"
-      }
+    "binary_sensor": {
+      "active_operations": { "name": "Einsätze laufen" }
     }
   }
 }
