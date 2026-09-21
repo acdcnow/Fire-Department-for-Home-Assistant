@@ -27,8 +27,10 @@ Home Assistant 2026.9 base, three federal states, new data model.
 * New attributes: `latest_incident`, `longest_running`, `average_duration`,
   `by_category`, `by_district`, `by_keyword`, `brigades`, `truncated`, `source_*`,
   `fetched_at`, `last_error`.
-* `tests/` with a Home Assistant stub, fixtures and ~350 assertions - runnable with a
-  plain Python interpreter, plus live validation of the real pages.
+* `tests/` with a Home Assistant stub, fixtures and 272 assertions in 22 test functions -
+  runnable with a plain Python interpreter, plus live validation of the real pages.
+* Wiki restructured: landing page, architecture and software design documents, workflow
+  diagrams and the archived 2.2.0 documentation.
 
 ### Changed
 

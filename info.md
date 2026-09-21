@@ -29,5 +29,7 @@ deployed brigades and the mission history of the last 24 hours.
 Vienna, Salzburg, Carinthia, Burgenland, Tyrol and Vorarlberg do not publish a
 machine readable mission list yet - the README lists the candidate pages and custom
 sources can be added in the options.
-
+**[Documentation wiki](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki)** ·
+[README](https://github.com/acdcnow/fire-department-for-Home-Assistant/blob/HA2026_09_dev/README.md) ·
+[Changelog](https://github.com/acdcnow/fire-department-for-Home-Assistant/blob/HA2026_09_dev/CHANGELOG.md)
 Unofficial project, not affiliated with any fire brigade or fire brigade association.

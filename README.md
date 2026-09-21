@@ -13,6 +13,21 @@ sensors, a binary sensor, automation events and dashboards.
 > brigade, the ÖBFV or any federal fire brigade association. All data comes from
 > publicly reachable pages - please read [Data sources and fair use](#data-sources-and-fair-use).
 
+## Documentation
+
+Developer and design documentation lives in the **[project wiki](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki)**:
+
+| Document | Contents |
+| :--- | :--- |
+| 🏛️ [Architecture Design Document](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki/Architecture-Design-Document) | Scope, requirements, context, component decomposition, architectural decisions, cross-cutting concerns, risks, deltas versus 2.2.0 |
+| 🛠️ [Software Design Document](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki/Software-Design-Document) | Module inventory, interface contracts, mission dictionary, component design, dynamic behaviour, error matrix, test and release process |
+| 📈 [Workflow Diagrams](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki/Workflow-Diagrams) | GitDiagram repository map plus setup, update, parsing, event, reload and migration workflows |
+| ➕ [Adding a New Source](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki/Adding-a-New-Source) | How to add a federal state or a new page format |
+| 🗄️ [Design Documentation 2.2.0](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki/Archive-2.2.0-Design-Documentation) | Archived documentation of the old line, including its known defects |
+
+The [wiki home](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki) explains which document belongs to which version line
+(`main` 2.2.0 = archived, `HA2026_09_dev` 3.0.x = current).
+
 ---
 
 ## Features
@@ -326,12 +341,17 @@ python tests/test_integration.py
 
 The test suite runs without Home Assistant: `tests/ha_stub.py` provides the small
 part of the Home Assistant API the integration touches, `tests/fixtures` contains
-small documents in the format of the supported pages. The parser part of the suite
-can also be pointed at the live pages:
+small documents in the format of the supported pages. 22 test functions with 272
+assertions cover the parsers, helpers, the entry lifecycle, entities and attributes,
+events, failures, the flows and the migration. The parser part of the suite can also
+be pointed at the live pages:
 
 ```bash
 python %TEMP%\fd_validate.py   # dev helper, downloads the real pages
 ```
+
+The design behind the code is documented in the [wiki](https://github.com/acdcnow/fire-department-for-Home-Assistant/wiki)
+(see [Documentation](#documentation)).
 
 ## License
 
