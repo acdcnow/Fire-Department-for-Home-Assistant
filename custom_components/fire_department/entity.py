@@ -74,6 +74,8 @@ class FireDepartmentEntity(CoordinatorEntity[FireDepartmentCoordinator]):
             "source_url": self._source.get("url"),
             "source_parser": self._source.get("parser"),
             "source_window": self._source.get("window"),
+            "source_kind": self._source.get("kind"),
+            "source_region": self._source.get("region"),
             "source_label": self._source.get("label"),
             "fetched_at": (
                 self.coordinator.fetched_at.isoformat() if self.coordinator.fetched_at else None

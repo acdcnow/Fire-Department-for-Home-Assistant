@@ -18,6 +18,7 @@ from .const import (
     CONFIG_ENTRY_MINOR_VERSION,
     CONFIG_ENTRY_VERSION,
     CONF_FILTER_CATEGORIES,
+    CONF_MAP_MARKERS,
     CONF_MAX_ITEMS,
     CONF_NAME,
     CONF_PAGE_FILTER,
@@ -32,6 +33,7 @@ from .const import (
     CONF_SOURCES,
     CONF_UPDATE_INTERVAL,
     DEFAULT_COLOR_SCHEME,
+    DEFAULT_MAP_MARKERS,
     DEFAULT_MAX_ITEMS,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
@@ -121,6 +123,7 @@ class FireDepartmentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_UPDATE_INTERVAL: user_input[CONF_UPDATE_INTERVAL],
                     CONF_COLOR_SCHEME: user_input[CONF_COLOR_SCHEME],
                     CONF_FILTER_CATEGORIES: user_input.get(CONF_FILTER_CATEGORIES) or [],
+                    CONF_MAP_MARKERS: DEFAULT_MAP_MARKERS,
                     CONF_MAX_ITEMS: DEFAULT_MAX_ITEMS,
                     CONF_PAGES: [],
                 },
@@ -182,6 +185,9 @@ class FireDepartmentOptionsFlow(OptionsFlow):
             self._options[CONF_UPDATE_INTERVAL] = user_input[CONF_UPDATE_INTERVAL]
             self._options[CONF_COLOR_SCHEME] = user_input[CONF_COLOR_SCHEME]
             self._options[CONF_FILTER_CATEGORIES] = user_input.get(CONF_FILTER_CATEGORIES) or []
+            self._options[CONF_MAP_MARKERS] = bool(
+                user_input.get(CONF_MAP_MARKERS, DEFAULT_MAP_MARKERS)
+            )
             self._options[CONF_MAX_ITEMS] = user_input[CONF_MAX_ITEMS]
             return self._save()
 
@@ -201,6 +207,10 @@ class FireDepartmentOptionsFlow(OptionsFlow):
                         CONF_FILTER_CATEGORIES,
                         default=self._options.get(CONF_FILTER_CATEGORIES) or [],
                     ): _categories(),
+                    vol.Optional(
+                        CONF_MAP_MARKERS,
+                        default=self._options.get(CONF_MAP_MARKERS, DEFAULT_MAP_MARKERS),
+                    ): bool,
                     vol.Required(
                         CONF_MAX_ITEMS,
                         default=self._options.get(CONF_MAX_ITEMS, DEFAULT_MAX_ITEMS),

@@ -18,6 +18,7 @@ import pathlib
 import re
 import sys
 from datetime import datetime
+from urllib.parse import urlencode
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -33,6 +34,8 @@ from custom_components.fire_department import config_flow as config_flow_module 
 from custom_components.fire_department import const  # noqa: E402
 from custom_components.fire_department import coordinator as coordinator_module  # noqa: E402
 from custom_components.fire_department import diagnostics as diagnostics_module  # noqa: E402
+from custom_components.fire_department import geocoding as geocoding_module  # noqa: E402
+from custom_components.fire_department import geo_location as geo_location_module  # noqa: E402
 from custom_components.fire_department import provider as P  # noqa: E402
 from custom_components.fire_department import sensor as sensor_module  # noqa: E402
 
@@ -284,9 +287,13 @@ def test_setup_entry() -> None:
     equal(len(coordinator.data["noe_active"]), 3, "active rows")
     equal(coordinator.update_interval, __import__("datetime").timedelta(minutes=30), "interval")
     equal(len(coordinator.sources), 3, "three sources")
-    check(coordinator.fetched_at is not None, "fetched_at set")
+    equal(coordinator.fetched_at is not None, True, "fetched_at set")
     equal(coordinator.last_error, None, "no error")
-    equal(hass.config_entries.forwarded[0][1], ("sensor", "binary_sensor"), "platforms forwarded")
+    equal(
+        hass.config_entries.forwarded[0][1],
+        ("sensor", "binary_sensor", "geo_location"),
+        "platforms forwarded",
+    )
     equal(len(entry._listeners), 1, "reload listener registered")
 
     equal(hass.config_entries.unloaded, [], "nothing unloaded yet")
@@ -701,6 +708,7 @@ def test_translations() -> None:
             const.CONF_COLOR_SCHEME,
             const.CONF_FILTER_CATEGORIES,
             const.CONF_MAX_ITEMS,
+            const.CONF_MAP_MARKERS,
         ):
             check(key in translations["options"]["step"]["general"]["data"], f"{name}: general field {key}")
 
@@ -722,6 +730,171 @@ def test_manifest() -> None:
             (base / "custom_components" / "fire_department" / "brand" / size).is_file(),
             f"brand/{size} exists",
         )
+
+
+def test_geocoding_candidates() -> None:
+    print("\n[map] municipality name variants")
+    equal(
+        geocoding_module.candidates("Stadt Gmünd"),
+        ["Gmünd", "Stadt Gmünd"],
+        "the 'Stadt' prefix is dropped first",
+    )
+    check("Zwettl" in geocoding_module.candidates("Zwettl-Stadt"), "'-Stadt' suffix is dropped")
+    check(
+        "Pyhra" in geocoding_module.candidates("Marktgemeinde Pyhra"),
+        "'Marktgemeinde' prefix is dropped",
+    )
+    check(
+        "Großdietmanns" in geocoding_module.candidates("Grossdietmanns"),
+        "'ss' fallback covers the umlaut spelling",
+    )
+    check(
+        "GöPFRITZ AN DER WILD" in geocoding_module.candidates("GöPFRITZ AN DER WILD"),
+        "mixed case names are used as published",
+    )
+    check("Seefeld" in geocoding_module.candidates("SEEFELD"), "all caps is title cased")
+    check(
+        "Weißenkirchen an der Pielach"
+        in geocoding_module.candidates("WEISSENKIRCHEN AN DER PIELACH"),
+        "connectives stay lower case",
+    )
+    equal(geocoding_module.candidates("   "), [], "empty name has no variants")
+    equal(
+        geocoding_module.query_parameters("Musterdorf", const.REGION_NOE)["q"],
+        "Musterdorf, Niederösterreich, Austria",
+        "query is narrowed to the federal state",
+    )
+    equal(
+        geocoding_module.query_parameters("Musterdorf", "custom")["q"],
+        "Musterdorf, Austria",
+        "custom sources fall back to Austria",
+    )
+
+
+def geocode_answers() -> dict[str, bytes]:
+    """Canned Nominatim responses for every town of the Lower Austria fixtures."""
+    documents: dict[str, bytes] = {}
+    source = dict(const.SOURCES["noe_active"])
+    text = P.decode_bytes(wastl_document("wastl_aktuell.html"), None)
+    rows = P.parse_source(text, source, datetime.now(P.TZ))
+    for index, row in enumerate(rows):
+        town = row.get("municipality")
+        if not town:
+            continue
+        for candidate in geocoding_module.candidates(town):
+            params = geocoding_module.query_parameters(candidate, const.REGION_NOE)
+            url = f"{geocoding_module.GEOCODE_URL}?{urlencode(params)}"
+            documents[url] = json.dumps(
+                [{"lat": f"48.1{index}00", "lon": f"15.2{index}00", "display_name": town}]
+            ).encode()
+    return documents
+
+
+def test_map_markers() -> None:
+    print("\n[map] one marker per running mission")
+    fast_geocoding()
+    try:
+        docs = documents()
+        docs.update(geocode_answers())
+        hass, entry, ok = ha_stub.run(setup_region(const.REGION_NOE, docs))
+        check(ok, "entry set up")
+        markers: list = Collector()
+        ha_stub.run(geo_location_module.async_setup_entry(hass, entry, markers))
+        equal(len(markers), 3, "one marker per running mission")
+
+        async def add_entities() -> None:
+            """Home Assistant calls async_added_to_hass when it adds an entity."""
+            await asyncio.gather(*(marker.async_added_to_hass() for marker in markers))
+
+        ha_stub.run(add_entities())
+        check(all(marker.source == const.SOURCE_MAP_MARKERS for marker in markers), "source attribute")
+        check(all(marker.latitude and marker.longitude for marker in markers), "coordinates set")
+        check(all(marker.state and marker.state > 0 for marker in markers), "distance from home")
+        check(
+            all(marker.device_info["identifiers"] == {(const.DOMAIN, entry.entry_id)} for marker in markers),
+            "markers belong to the device",
+        )
+        attributes = markers[0].extra_state_attributes
+        equal(attributes["source_kind"], const.KIND_ACTIVE, "source kind attribute")
+        check(attributes["municipality"], "municipality attribute")
+        check(attributes["type"], "type attribute")
+        check(" · " in markers[0].name, "name is keyword and town")
+
+        # a mission finishes -> its marker disappears again
+        coordinator = entry.runtime_data
+        active_id = const.SOURCES["noe_active"]["id"]
+        remaining = coordinator.data[active_id][1:]
+
+        async def push(data: dict) -> None:
+            """Update the coordinator and run the tasks its listener scheduled."""
+            coordinator.async_set_updated_data(data)
+            await asyncio.gather(*hass.tasks)
+            hass.tasks.clear()
+
+        ha_stub.run(push({**coordinator.data, active_id: remaining}))
+        equal(
+            sum(1 for marker in markers if getattr(marker, "removed", False)),
+            1,
+            "finished mission removes its marker",
+        )
+        equal(len(markers), 3, "no new marker yet")
+
+        # ... and a new mission adds one
+        new_row = dict(remaining[0])
+        new_row["id"] = "fixture_new"
+        ha_stub.run(push({**coordinator.data, active_id: [new_row] + remaining}))
+        equal(len(markers), 4, "new mission adds a marker")
+        equal(markers[-1].extra_state_attributes["mission_id"], "fixture_new", "marker id")
+    finally:
+        restore_geocoding()
+
+
+def test_map_markers_disabled() -> None:
+    print("\n[map] markers switched off")
+    options = options_for(const.REGION_NOE)
+    options[const.CONF_MAP_MARKERS] = False
+    hass = ha_stub.FakeHass(ha_stub.Session(documents()))
+    entry = ha_stub.add_entry(hass, title="Test", options=options)
+    ok = ha_stub.run(integration.async_setup_entry(hass, entry))
+    check(ok, "entry set up")
+    markers: list = Collector()
+    ha_stub.run(geo_location_module.async_setup_entry(hass, entry, markers))
+    equal(len(markers), 0, "no markers without the option")
+    check(
+        not any("nominatim" in url for url in hass.session.requests),
+        "switched off means no external lookup",
+    )
+
+
+def test_map_markers_without_coordinates() -> None:
+    print("\n[map] unknown town")
+    fast_geocoding()
+    try:
+        hass, entry, _ = ha_stub.run(setup_region(const.REGION_NOE))
+        markers: list = Collector()
+        ha_stub.run(geo_location_module.async_setup_entry(hass, entry, markers))
+        equal(len(markers), 0, "no marker when the town cannot be resolved")
+        check(
+            any("nominatim" in url for url in hass.session.requests),
+            "the lookup was attempted",
+        )
+    finally:
+        restore_geocoding()
+
+
+def fast_geocoding() -> None:
+    """Drop the one request per second rule for the test run."""
+    global _GEOCODE_INTERVAL
+    _GEOCODE_INTERVAL = geocoding_module.GEOCODE_MIN_INTERVAL
+    geocoding_module.GEOCODE_MIN_INTERVAL = 0
+
+
+def restore_geocoding() -> None:
+    """Restore the Nominatim throttle."""
+    geocoding_module.GEOCODE_MIN_INTERVAL = _GEOCODE_INTERVAL
+
+
+_GEOCODE_INTERVAL = 1.1
 
 
 def main() -> int:

@@ -41,7 +41,12 @@ def callback(func):
 # --------------------------------------------------------------------------- #
 # const / core / exceptions
 # --------------------------------------------------------------------------- #
-const = _attr(_module("homeassistant.const"), Platform=types.SimpleNamespace(SENSOR="sensor", BINARY_SENSOR="binary_sensor"))
+const = _attr(
+    _module("homeassistant.const"),
+    Platform=types.SimpleNamespace(
+        SENSOR="sensor", BINARY_SENSOR="binary_sensor", GEO_LOCATION="geo_location"
+    ),
+)
 core = _module("homeassistant.core")
 core.callback = callback
 core.HomeAssistant = object
@@ -68,6 +73,24 @@ class _Dt:
 
 util = _module("homeassistant.util")
 util.dt = _attr(_module("homeassistant.util.dt"), **{"utcnow": _Dt.utcnow, "now": _Dt.now})
+
+
+class _Location:
+    """Stand-in for homeassistant.util.location."""
+
+    @staticmethod
+    def distance(lat1, lon1, lat2, lon2):
+        """Great circle distance in metres, ``None`` if a value is missing."""
+        if None in (lat1, lon1, lat2, lon2):
+            return None
+        from math import asin, cos, radians, sin, sqrt
+
+        lat1, lon1, lat2, lon2 = map(radians, (lat1, lon1, lat2, lon2))
+        part = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+        return 6371000 * 2 * asin(sqrt(part))
+
+
+util.location = _attr(_module("homeassistant.util.location"), distance=_Location.distance)
 
 
 # --------------------------------------------------------------------------- #
@@ -289,6 +312,11 @@ class Session:
         self.requests: list[str] = []
 
     def get(self, url, **kwargs):
+        params = kwargs.get("params")
+        if params:
+            from urllib.parse import urlencode
+
+            url = f"{url}?{urlencode(params)}"
         self.requests.append(url)
         return _ResponseContext(self, url)
 
@@ -309,6 +337,11 @@ class _Response:
 
     async def read(self) -> bytes:
         return self._body
+
+    async def json(self, content_type=None, **kwargs):
+        import json
+
+        return json.loads(self._body.decode("utf-8"))
 
     async def __aenter__(self):
         return self
@@ -350,6 +383,7 @@ class DataUpdateCoordinator(Generic[_DataT]):
         self.data = None
         self.last_update_success = True
         self.update_count = 0
+        self._listeners: list = []
 
     async def _async_update_data(self):  # pragma: no cover - overridden
         raise NotImplementedError
@@ -365,10 +399,25 @@ class DataUpdateCoordinator(Generic[_DataT]):
             self.last_update_success = False
             raise
         self.update_count += 1
+        self._notify_listeners()
         return self.data
+
+    def async_add_listener(self, update_callback, context=None):
+        self._listeners.append(update_callback)
+
+        def remove_listener():
+            if update_callback in self._listeners:
+                self._listeners.remove(update_callback)
+
+        return remove_listener
+
+    def _notify_listeners(self):
+        for listener in list(self._listeners):
+            listener()
 
     def async_set_updated_data(self, data):
         self.data = data
+        self._notify_listeners()
 
     async def async_shutdown(self):
         return None
@@ -409,6 +458,34 @@ class AddEntitiesCallback:
 
 
 entity_platform = _attr(_module("homeassistant.helpers.entity_platform"), AddEntitiesCallback=AddEntitiesCallback)
+
+
+class Store:
+    """Minimal in-memory stand-in for homeassistant.helpers.storage.Store."""
+
+    def __init__(self, hass, version, key, **kwargs):
+        self.hass = hass
+        self.version = version
+        self.key = key
+        self.data = None
+        self.saved: list = []
+
+    async def async_load(self):
+        return self.data
+
+    async def async_save(self, data):
+        self.data = data
+        self.saved.append(data)
+
+    def async_delay_save(self, data_func, delay: float = 0):
+        self.data = data_func()
+        self.saved.append(self.data)
+
+    def __class_getitem__(cls, item):  # Store[dict] in annotations
+        return cls
+
+
+storage = _attr(_module("homeassistant.helpers.storage"), Store=Store)
 
 
 # --------------------------------------------------------------------------- #
@@ -481,6 +558,75 @@ components.sensor = sensor_module
 components.binary_sensor = binary_sensor_module
 
 
+class GeolocationEvent:
+    """Minimal stand-in for homeassistant.components.geo_location.GeolocationEvent."""
+
+    _attr_should_poll = True
+    _attr_source = None
+    _attr_distance = None
+    _attr_latitude = None
+    _attr_longitude = None
+    _attr_unique_id = None
+
+    @property
+    def state(self):
+        return round(self._attr_distance, 1) if self._attr_distance is not None else None
+
+    @property
+    def source(self):
+        return self._attr_source
+
+    @property
+    def distance(self):
+        return self._attr_distance
+
+    @property
+    def latitude(self):
+        return self._attr_latitude
+
+    @property
+    def longitude(self):
+        return self._attr_longitude
+
+    @property
+    def state_attributes(self):
+        return {
+            "source": self.source,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+        }
+
+    @property
+    def extra_state_attributes(self):
+        return None
+
+    @property
+    def unique_id(self):
+        return self._attr_unique_id
+
+    @property
+    def name(self):
+        return getattr(self, "_attr_name", None)
+
+    @property
+    def device_info(self):
+        return None
+
+    async def async_added_to_hass(self):
+        return None
+
+    async def async_remove(self):
+        self.removed = True
+
+    def async_write_ha_state(self):
+        return None
+
+
+components.geo_location = _attr(
+    _module("homeassistant.components.geo_location"), GeolocationEvent=GeolocationEvent
+)
+
+
 # --------------------------------------------------------------------------- #
 # hass
 # --------------------------------------------------------------------------- #
@@ -520,13 +666,28 @@ class FakeConfigEntries:
         return True
 
 
+class FakeConfig:
+    """Minimal stand-in for the Home Assistant config (home coordinates)."""
+
+    def __init__(self, latitude=48.2082, longitude=16.3738):
+        self.latitude = latitude
+        self.longitude = longitude
+
+
 class FakeHass:
     def __init__(self, session: Session | None = None):
         self.bus = FakeBus()
         self.config_entries = FakeConfigEntries()
+        self.config = FakeConfig()
         self.session = session or Session({})
         self.data: dict = {}
         self.loop = None
+        self.tasks: list = []
+
+    def async_create_task(self, target, name=None, eager_start=True):
+        task = asyncio.ensure_future(target)
+        self.tasks.append(task)
+        return task
 
 
 def add_entry(hass: FakeHass, **kwargs) -> ConfigEntry:

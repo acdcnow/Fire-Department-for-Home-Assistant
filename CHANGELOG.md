@@ -3,6 +3,40 @@
 All notable changes to this project are documented in this file.
 Tags in this repository have no `v` prefix.
 
+## 3.0.0 - 2026-09-24
+
+Everything from `3.0.0-beta.1`, nothing breaking on top of it, plus a ready made
+dashboard and map markers.
+
+### Added
+
+* **Map markers**: every running mission is exposed as a `geo_location` entity, so the
+  built-in map card shows the current situation without any additional integration
+  (`geo_location_sources: [{source: fire_department}]`). The marker sits in the centre
+  of the municipality, is named `<keyword> · <town>`, reports the distance from home in
+  metres as its state and carries the whole mission as attributes. Markers appear and
+  disappear with the missions.
+* **Pro dashboard** (`dashboard files/pro/fire_department_pro.yaml`): five views with
+  KPI tiles, live map, group bars, searchable and sortable tables and two iframe
+  fallbacks. It finds the sensors through their attributes, so it works with any
+  language, entry name and number of federal states. Needs the HACS cards
+  `flex-table-card`, `auto-entities` and `mushroom`.
+* Attributes `source_kind` and `source_region` on every sensor, so dashboards can pick
+  the sensors of a kind without knowing their entity ids.
+
+### Notes
+
+* **Map markers are on by default.** The municipality of a mission is looked up at
+  `nominatim.openstreetmap.org`, throttled to one request per second and cached
+  permanently in `.storage/fire_department_geocoding` - after the first few days it is
+  effectively offline. It can be switched off in *Configure → General settings → Map
+  markers*, then no lookup happens at all.
+* Map tiles are served by the `map_tiles` system integration of Home Assistant 2026.9,
+  which proxies the OpenStreetMap tiles through your own instance - no API key.
+* The test suite now covers 26 test functions, including the name variants used for the
+  municipality lookup, marker creation, marker removal when a mission ends and the
+  "switched off" path.
+
 ## 3.0.0-beta.1 - 2026-09-19
 
 Home Assistant 2026.9 base, three federal states, new data model.

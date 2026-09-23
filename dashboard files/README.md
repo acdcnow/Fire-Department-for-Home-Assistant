@@ -17,3 +17,10 @@ With a German Home Assistant the entity names are e.g.
 
 All rows are colour coded through the `color` attribute of every mission, which depends
 on the colour scheme selected in the integration options.
+
+## Ready made dashboard (recommended)
+
+The [`pro`](pro/README.md) folder contains a complete dashboard instead of single cards:
+KPI tiles, live map with mission markers, group bars, searchable and sortable tables and
+a large map view. It does **not** hard-code any entity id, so nothing has to be adjusted
+for your language, your entry name or the number of federal states.

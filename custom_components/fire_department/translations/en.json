@@ -39,7 +39,8 @@
           "update_interval": "Update interval (minutes)",
           "color_scheme": "Colour scheme",
           "filter_categories": "Only these mission types",
-          "max_items": "Missions in the attributes (0 = none)"
+          "max_items": "Missions in the attributes (0 = none)",
+          "map_markers": "Map markers (municipality lookup)"
         }
       },
       "sources": {

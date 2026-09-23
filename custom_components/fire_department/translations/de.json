@@ -39,7 +39,8 @@
           "update_interval": "Aktualisierung (Minuten)",
           "color_scheme": "Farbschema",
           "filter_categories": "Nur diese Einsatzarten",
-          "max_items": "Einsätze in den Attributen (0 = keine)"
+          "max_items": "Einsätze in den Attributen (0 = keine)",
+          "map_markers": "Kartenmarker (Gemeinde-Suche)"
         }
       },
       "sources": {

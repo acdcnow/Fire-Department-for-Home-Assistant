@@ -113,7 +113,7 @@ the integration - no restart needed.
 
 | Menu entry | What it does |
 | --- | --- |
-| **General settings** | Update interval, colour scheme, category filter, number of missions kept in the attributes |
+| **General settings** | Update interval, colour scheme, category filter, number of missions kept in the attributes, map markers |
 | **Data sources** | Pick the page per sensor, or set a sensor to *Not used* to remove it |
 | **Add custom source** | Read any supported table format from another address |
 | **Remove custom source** | Delete custom sources again |
@@ -143,6 +143,7 @@ WASTL network or other lists in the same format can be added:
 | `sensor.<name>_deployed_fire_brigades` | Number of deployed brigades |
 | `sensor.<name>_completed_missions` | Number of finished missions of the window |
 | `binary_sensor.<name>_operations_running` | `on` while at least one mission is running (`device_class: safety`) |
+| `geo_location.<name>_<alarm>_<town>` | One map marker per running mission (`source: fire_department`), created and removed with the mission |
 
 ### Attributes
 
@@ -162,6 +163,8 @@ color_legend: {high: '#dc2626', medium: '#f59e0b', low: '#2563eb', info: '#6b728
 source_id: noe_active
 source_url: https://www.feuerwehr-krems.at/...
 source_parser: wastl_incidents
+source_kind: active_operations
+source_region: lower_austria
 source_window: live
 fetched_at: 2026-09-19T15:31:02.114+00:00
 last_error: null
@@ -208,6 +211,7 @@ The `dashboard files` folder contains ready to paste cards:
 | `deployed_brigades.yaml` | Single card with all deployed brigades |
 | `completed_missions.yaml` | Single card with the mission history |
 | `operational_Overview.yaml` | iframe with the WASTL overview map (Lower Austria) |
+| [`pro/fire_department_pro.yaml`](dashboard%20files/pro/README.md) | **Recommended:** complete dashboard with KPI tiles, live map, group bars and tables for all three views - works without adjusting a single entity id |
 
 Rows are colour coded through the `color` attribute:
 
@@ -223,6 +227,42 @@ Rows are colour coded through the `color` attribute:
 ```
 
 A category legend can be rendered from `color_legend`.
+
+---
+
+## Map
+
+Every running mission becomes a `geo_location` entity, so the built-in map card shows
+the current situation without any additional integration:
+
+```yaml
+type: map
+geo_location_sources:
+  - source: fire_department
+    label_mode: name      # name | state | attribute | icon
+auto_fit: true
+```
+
+* The marker sits in the **centre of the municipality** - the mission lists publish no
+  coordinates, so the town is looked up once (see below) and its position cached.
+* Name: `<keyword> · <town>`, state: **distance from home in metres**, attributes: the
+  whole mission, so automations can react to a marker.
+* Markers are created and removed with the missions.
+* The tiles behind the map are served by the **`map_tiles` system integration** of Home
+  Assistant 2026.9, which proxies the OpenStreetMap tiles through your own instance
+  behind a rotating token (32 MB in-memory cache, no API key, nothing loaded from a
+  third party by your browser).
+* No markers wanted? Switch them off in **Configure -> General settings -> Map markers**.
+  WASTL's own overview map and a plain OpenStreetMap embed are part of the
+  [pro dashboard](dashboard%20files/pro/README.md).
+
+### Geocoding and privacy
+
+Municipalities that are not cached yet are looked up at `nominatim.openstreetmap.org`
+(OpenStreetMap). The requests are throttled to one per second and cached permanently in
+`.storage/fire_department_geocoding`, including negative results, so after the first few
+days an installation is effectively offline. With *Map markers* switched off no request
+is made at all.
 
 ---
 

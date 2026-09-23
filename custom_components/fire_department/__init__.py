@@ -39,7 +39,7 @@ from .coordinator import FireDepartmentCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = (Platform.SENSOR, Platform.BINARY_SENSOR)
+PLATFORMS = (Platform.SENSOR, Platform.BINARY_SENSOR, Platform.GEO_LOCATION)
 
 #: config entry v1 stored the sensor name instead of the source id
 LEGACY_KIND_NAMES = {

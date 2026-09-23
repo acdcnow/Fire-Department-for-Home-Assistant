@@ -267,5 +267,38 @@ def build_sources(options: dict) -> list[dict]:
     return sources
 
 
+# --------------------------------------------------------------------------- #
+# map markers (geo_location platform)
+# --------------------------------------------------------------------------- #
+#: value of the 'source' attribute of the mission markers - referenced by
+#: geo_location_sources in the map card of the dashboard
+SOURCE_MAP_MARKERS = DOMAIN
+
+#: option: create a map marker for every running mission (looks the municipality
+#: up at OpenStreetMap, see geocoding.py)
+CONF_MAP_MARKERS = "map_markers"
+DEFAULT_MAP_MARKERS = True
+
+#: federal state per region, narrows the geocoding lookup down
+REGION_STATES = {
+    REGION_NOE: "Niederösterreich",
+    REGION_OOE: "Oberösterreich",
+    REGION_STMK: "Steiermark",
+}
+
+GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+GEOCODE_COUNTRY = "Austria"
+GEOCODE_USER_AGENT = (
+    "HomeAssistant-FireDepartment/3.0 "
+    "(+https://github.com/acdcnow/fire-department-for-Home-Assistant)"
+)
+#: Nominatim usage policy: at most one request per second
+GEOCODE_MIN_INTERVAL = 1.1
+GEOCODE_TIMEOUT = 10
+#: pause after a 403/429 response (seconds)
+GEOCODE_BLOCK_TIME = 600
+GEOCODE_STORAGE_KEY = f"{DOMAIN}_geocoding"
+GEOCODE_STORAGE_VERSION = 1
+
 SIGNAL_NEW_INCIDENT = f"{DOMAIN}_new_incident"
 SIGNAL_INCIDENT_CLOSED = f"{DOMAIN}_incident_closed"
