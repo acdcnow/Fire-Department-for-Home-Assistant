@@ -18,6 +18,31 @@ KEY_ACTIVE_OPS = "active_operations"
 KEY_DEPLOYED_FF = "deployed_fire_brigade"
 KEY_COMPLETED = "completed_missions"
 
+# Layout of every row inside the 'data_list' attribute
+# [Datum, Zeit, Alarmzentrale/Feuerwehr, Gemeinde, Einsatzart]
+ROW_DATE = 0
+ROW_TIME = 1
+ROW_CENTER = 2
+ROW_PLACE = 3
+ROW_KIND = 4
+
+# geo_location / map support
+# Value of the 'source' attribute of the map markers, referenced by
+# geo_location_sources inside the map card of the dashboard.
+SOURCE = DOMAIN
+# Set to False for a fully offline installation - no map markers are created.
+GEOCODE_ENABLED = True
+GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+GEOCODE_REGION = "Niederösterreich, Austria"
+GEOCODE_USER_AGENT = (
+    "HomeAssistant-FireDepartment/2.3 "
+    "(+https://github.com/acdcnow/Fire-Department-for-Home-Assistant)"
+)
+# Nominatim usage policy: at most one request per second.
+GEOCODE_MIN_INTERVAL = 1.1
+GEOCODE_STORAGE_KEY = f"{DOMAIN}_geocoding"
+GEOCODE_STORAGE_VERSION = 1
+
 PARSER_TYPES = {
     TYPE_INCIDENTS: "Incidents List (Current/History)",
     TYPE_DEPARTMENTS: "Active Departments List",
