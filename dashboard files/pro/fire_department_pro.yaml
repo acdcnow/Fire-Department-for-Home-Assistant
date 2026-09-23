@@ -1,0 +1,459 @@
+# =============================================================================
+#  Feuerwehr NÖ · Einsatzleitstelle  --  Profi-Dashboard
+#  ---------------------------------------------------------------------------
+#  Dieses File ist ein KOMPLETTES Dashboard (Raw configuration).
+#  Einbau:
+#    Einstellungen -> Dashboards -> + Dashboard hinzufügen -> Neu von Grund auf
+#    -> (Titel "Feuerwehr NÖ") -> speichern -> Dashboard öffnen
+#    -> Stift/3-Punkte -> "Raw-Konfigurationseditor" -> Inhalt dieser Datei
+#       einfügen -> speichern
+#  Alternativ als YAML-Dashboard:
+#    Datei nach /config/dashboards/fire_department.yaml kopieren und in der
+#    configuration.yaml eintragen:
+#      lovelace:
+#        dashboards:
+#          feuerwehr:
+#            mode: yaml
+#            title: Feuerwehr NÖ
+#            icon: mdi:fire-station
+#            show_in_sidebar: true
+#            filename: dashboards/fire_department.yaml
+#  ---------------------------------------------------------------------------
+#  Benötigte HACS-Karten (Frontend):
+#    - flex-table-card   (custom:flex-table-card)  -> Tabellen
+#    - auto-entities     (custom:auto-entities)    -> findet die Sensoren selbst
+#    - mushroom          (custom:mushroom-template-card) -> KPI-Kacheln
+#    - card-mod          (optional, nur für Feinschliff)
+#  Alles andere sind eingebaute Karten (map, history-graph, iframe, markdown).
+#  ---------------------------------------------------------------------------
+#  WICHTIG - Die Entity-IDs werden NICHT fest verdrahtet:
+#  Die Sensoren werden über ihre Attribute (data_list + url) gefunden. Dadurch
+#  funktioniert das Dashboard unabhängig davon, ob die Integration auf Deutsch
+#  oder Englisch läuft und wie du sie benannt hast.
+# =============================================================================
+
+title: Feuerwehr NÖ
+
+views:
+  # ===========================================================================
+  # 1) LEITSTELLE - Überblick
+  # ===========================================================================
+  - title: Leitstelle
+    path: leitstelle
+    icon: mdi:fire-station
+    type: masonry
+    cards:
+      # -----------------------------------------------------------------------
+      # KPI-Kacheln (mushroom-template-card, in einem 3er-Grid)
+      # Datenquelle: sensor.*_active_operations / *_aktuelle_einsatze
+      # -----------------------------------------------------------------------
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+          - type: custom:mushroom-template-card
+            primary: >-
+              {{ states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_EinsatzAktuell') | map(attribute='state') | first | default('–') }}
+            secondary: |-
+              {% set s = states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_EinsatzAktuell') | list | first %}
+              Aktive Einsätze
+              {%- if s %} · Stand {{ s.last_updated.strftime('%H:%M') }}{% endif %}
+            icon: mdi:fire-alert
+            icon_color: red
+            multiline_secondary: true
+            tap_action:
+              action: none
+            card_mod:
+              style: |
+                ha-card { --mush-icon-size: 44px; }
+          - type: custom:mushroom-template-card
+            primary: >-
+              {{ states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_FFimEinsatz') | map(attribute='state') | first | default('–') }}
+            secondary: |-
+              {% set s = states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_FFimEinsatz') | list | first %}
+              Feuerwehren im Einsatz
+              {%- if s %} · Stand {{ s.last_updated.strftime('%H:%M') }}{% endif %}
+            icon: mdi:fire-truck
+            icon_color: orange
+            multiline_secondary: true
+            tap_action:
+              action: none
+            card_mod:
+              style: |
+                ha-card { --mush-icon-size: 44px; }
+          - type: custom:mushroom-template-card
+            primary: >-
+              {{ states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_EinsatzHistorie') | map(attribute='state') | first | default('–') }}
+            secondary: |-
+              {% set s = states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_EinsatzHistorie') | list | first %}
+              Abgeschlossene Einsätze
+              {%- if s %} · Stand {{ s.last_updated.strftime('%H:%M') }}{% endif %}
+            icon: mdi:clipboard-check-outline
+            icon_color: blue
+            multiline_secondary: true
+            tap_action:
+              action: none
+            card_mod:
+              style: |
+                ha-card { --mush-icon-size: 44px; }
+
+      # -----------------------------------------------------------------------
+      # Karte: eingebaute HA-Map-Karte
+      # Die Marker kommen aus der Integration (Platform geo_location,
+      # source = "fire_department"). Kacheln = OSM über die System-Integration
+      # "map_tiles" (Home Assistant 2026.9) - kostenlos, kein API-Key.
+      # -----------------------------------------------------------------------
+      - type: map
+        title: Aktive Einsätze · Niederösterreich
+        aspect_ratio: '58%'
+        default_zoom: 9
+        auto_fit: true
+        theme_mode: auto
+        cluster: true
+        hours_to_show: 0
+        geo_location_sources:
+          - source: fire_department
+            label_mode: name
+
+      # -----------------------------------------------------------------------
+      # Gruppen-Auswertung: Verteilung nach Einsatzart + Top-Gemeinden
+      # Reines Jinja in einer Markdown-Karte -> keine zusätzlichen Sensoren
+      # -----------------------------------------------------------------------
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: markdown
+            title: Nach Einsatzart
+            content: |-
+              {% set ops = states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_EinsatzAktuell') | list | first %}
+              {% set rows = state_attr(ops.entity_id, 'data_list') if ops else [] %}
+              {% set meta = {'B': ('Brand', '#c62828'), 'T': ('Technisch', '#ef6c00'), 'S': ('Schadstoff', '#6a1b9a'), 'SOF': ('Sonderaufgabe', '#00838f'), 'U': ('Übung', '#546e7a')} %}
+              {% set ns = namespace(counts={}) %}
+              {% for r in rows or [] %}
+                {% set letters = r[4] | regex_findall('^[A-Za-zÄÖÜäöü]+') %}
+                {% set code = (letters[0] | upper) if letters else '?' %}
+                {% set _ = ns.counts.update({code: ns.counts.get(code, 0) + 1}) %}
+              {% endfor %}
+              {% set total = ns.counts.values() | sum %}
+              {% for code, count in ns.counts.items() | sort(attribute='1', reverse=true) %}
+              {% set label = meta[code][0] if code in meta else code %}
+              {% set color = meta[code][1] if code in meta else '#607d8b' %}
+              <div style="display:flex;align-items:center;gap:10px;margin:6px 0">
+                <div style="flex:0 0 8.5em;font-weight:600;font-size:.95em">{{ label }}</div>
+                <div style="flex:1 1 auto;background:rgba(127,127,127,.25);border-radius:8px;height:16px;overflow:hidden">
+                  <div style="height:16px;width:{{ (100 * count / total) | round(1) }}%;background:{{ color }}"></div>
+                </div>
+                <div style="flex:0 0 2.5em;text-align:right;font-variant-numeric:tabular-nums">{{ count }}</div>
+              </div>
+              {% endfor %}
+              {% if not ns.counts %}
+              <div>Keine aktiven Einsätze.</div>
+              {% else %}
+              <div style="margin-top:8px;opacity:.7;font-size:.9em">Summe: {{ total }} Einsätze</div>
+              {% endif %}
+          - type: markdown
+            title: Top-Gemeinden
+            content: |-
+              {% set ops = states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'Land_EinsatzAktuell') | list | first %}
+              {% set rows = state_attr(ops.entity_id, 'data_list') if ops else [] %}
+              {% set ns = namespace(counts={}) %}
+              {% for r in rows or [] %}
+                {% set town = r[3] if r[3] and r[3] != '-' else 'ohne Angabe' %}
+                {% set _ = ns.counts.update({town: ns.counts.get(town, 0) + 1}) %}
+              {% endfor %}
+              {% set top = ns.counts.items() | sort(attribute='1', reverse=true) %}
+              {% for town, count in top[:8] %}
+              <div style="display:flex;align-items:center;gap:10px;margin:6px 0">
+                <div style="flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ town }}</div>
+                <div style="flex:0 0 2.5em;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">{{ count }}</div>
+              </div>
+              {% endfor %}
+              {% if not ns.counts %}
+              <div>Keine aktiven Einsätze.</div>
+              {% endif %}
+
+      # -----------------------------------------------------------------------
+      # Die neuesten Einsätze (kompakte Vorschau der Tabelle)
+      # -----------------------------------------------------------------------
+      - type: custom:auto-entities
+        show_empty: true
+        card:
+          type: custom:flex-table-card
+          title: Neueste Einsätze
+          max_rows: 6
+          columns:
+            - name: ''
+              data: data_list
+              modify: >-
+                (function () { var t = x[4] || ''; var p = t.toUpperCase().indexOf('SOF') === 0 ? 'SOF' : t.charAt(0).toUpperCase(); var c = {B: '#c62828', T: '#ef6c00', S: '#6a1b9a', SOF: '#00838f', U: '#546e7a'}[p] || '#607d8b'; return '<span style="display:inline-block;min-width:2.4em;text-align:center;padding:0 5px;border-radius:6px;color:#fff;font-weight:600;font-size:.85em;background:' + c + '">' + p + '</span>'; })()
+              id: kat
+            - name: Einsatzart
+              data: data_list
+              modify: x[4]
+              id: art
+            - name: Gemeinde
+              data: data_list
+              modify: x[3]
+              id: gemeinde
+            - name: Zeit
+              data: data_list
+              modify: x[1]
+              id: zeit
+        filter:
+          include:
+            - attributes:
+                data_list: '$$*'
+                url: '/Land_EinsatzAktuell/'
+
+      # -----------------------------------------------------------------------
+      # Datenquellen + Frische
+      # -----------------------------------------------------------------------
+      - type: markdown
+        title: Datenquellen
+        content: |-
+          {% set all = states.sensor | selectattr('attributes.url', 'defined') | selectattr('attributes.url', 'search', 'feuerwehr-krems') | list %}
+          {% for s in all %}
+          <div style="display:flex;gap:8px;margin:4px 0">
+            <div style="flex:1 1 auto">{{ s.name }}</div>
+            <div style="font-variant-numeric:tabular-nums">{{ s.state }}</div>
+            <div style="flex:0 0 9em;text-align:right;opacity:.75">{{ relative_time(s.last_updated) }}</div>
+          </div>
+          {% endfor %}
+          {% if not all %}
+          <div>Sensoren nicht gefunden - läuft die Integration "Fire Department Info"?</div>
+          {% endif %}
+          <div style="margin-top:8px;opacity:.7;font-size:.9em">
+            Quelle: WASTL / NÖ Landeswarnzentrale · Aktualisierung laut Update-Intervall der Integration
+          </div>
+
+  # ===========================================================================
+  # 2) AKTIVE EINSÄTZE - die volle Tabelle (Suchfeld + sortierbare Header)
+  # ===========================================================================
+  - title: Aktive Einsätze
+    path: aktive-einsaetze
+    icon: mdi:fire-alert
+    type: masonry
+    cards:
+      - type: custom:auto-entities
+        show_empty: true
+        card:
+          type: custom:flex-table-card
+          title: Aktive Einsätze in Niederösterreich
+          enable_search: true
+          display_footer: true
+          columns:
+            - name: Kat.
+              data: data_list
+              modify: >-
+                (function () { var t = x[4] || ''; var p = t.toUpperCase().indexOf('SOF') === 0 ? 'SOF' : t.charAt(0).toUpperCase(); var c = {B: '#c62828', T: '#ef6c00', S: '#6a1b9a', SOF: '#00838f', U: '#546e7a'}[p] || '#607d8b'; return '<span style="display:inline-block;min-width:2.4em;text-align:center;padding:0 5px;border-radius:6px;color:#fff;font-weight:600;font-size:.85em;background:' + c + '">' + p + '</span>'; })()
+              id: kat
+            - name: Einsatzart
+              data: data_list
+              modify: x[4]
+              id: art
+            - name: Gemeinde
+              data: data_list
+              modify: x[3]
+              id: gemeinde
+            - name: Alarmzentrale
+              data: data_list
+              modify: x[2]
+              id: alarmzentrale
+            - name: Datum
+              data: data_list
+              modify: x[0]
+              id: datum
+              footer_type: count
+            - name: Zeit
+              data: data_list
+              modify: x[1]
+              id: zeit
+        filter:
+          include:
+            - attributes:
+                data_list: '$$*'
+                url: '/Land_EinsatzAktuell/'
+
+      - type: markdown
+        title: Wie gruppiere ich diese Liste?
+        content: |-
+          * **Sortieren / gruppieren:** Klick auf einen Spaltenkopf. Ein Klick auf
+            `Kat.` stellt alle gleichen Einsatzarten zusammen, `Gemeinde` bzw.
+            `Alarmzentrale` gruppiert nach Ort bzw. Bezirksalarmzentrale.
+          * **Suchen / filtern:** Das Suchfeld oben filtert live über alle Spalten,
+            z. B. `T1` (Einsatzart) oder `Zwettl` (Gemeinde).
+          * **Anzahl** steht in der Fußzeile der Tabelle, die Summe der
+            Einsatzstunden liefert die Quelle nicht (WASTL zeigt relative Zeiten).
+          * Spalte `Zeit` ist die Angabe der Quelle: `< 1 std.` heißt *seit unter
+            einer Stunde*, `~ 3 std.` *seit etwa drei Stunden*.
+
+  # ===========================================================================
+  # 3) FEUERWEHREN IM EINSATZ
+  # ===========================================================================
+  - title: Feuerwehren im Einsatz
+    path: feuerwehren
+    icon: mdi:fire-truck
+    type: masonry
+    cards:
+      - type: custom:auto-entities
+        show_empty: true
+        card:
+          type: custom:flex-table-card
+          title: Aktuell im Einsatz stehende Feuerwehren
+          enable_search: true
+          display_footer: true
+          columns:
+            - name: Kat.
+              data: data_list
+              modify: >-
+                (function () { var t = x[4] || ''; var p = t.toUpperCase().indexOf('SOF') === 0 ? 'SOF' : t.charAt(0).toUpperCase(); var c = {B: '#c62828', T: '#ef6c00', S: '#6a1b9a', SOF: '#00838f', U: '#546e7a'}[p] || '#607d8b'; return '<span style="display:inline-block;min-width:2.4em;text-align:center;padding:0 5px;border-radius:6px;color:#fff;font-weight:600;font-size:.85em;background:' + c + '">' + p + '</span>'; })()
+              id: kat
+            - name: Feuerwehr
+              data: data_list
+              modify: x[2]
+              id: feuerwehr
+            - name: Einsatzart
+              data: data_list
+              modify: x[4]
+              id: art
+            - name: Datum
+              data: data_list
+              modify: x[0]
+              id: datum
+              footer_type: count
+            - name: Zeit
+              data: data_list
+              modify: x[1]
+              id: zeit
+        filter:
+          include:
+            - attributes:
+                data_list: '$$*'
+                url: '/Land_FFimEinsatz/'
+
+      - type: markdown
+        content: |-
+          Die Liste enthält **eine Zeile je Feuerwehr und Einsatz**. Mehrere
+          Feuerwehren beim selben Einsatz ergeben daher mehrere Zeilen - die
+          Anzahl der Zeilen ist die Anzahl der Einsatzkräfte-Einheiten, nicht
+          die Anzahl der Einsätze. Für die Anzahl der Einsätze siehe
+          *Aktive Einsätze*.
+
+  # ===========================================================================
+  # 4) EINSATZHISTORIE - abgeschlossene Einsätze + Verlauf
+  # ===========================================================================
+  - title: Historie
+    path: historie
+    icon: mdi:history
+    type: masonry
+    cards:
+      - type: custom:auto-entities
+        card:
+          type: history-graph
+          title: Einsatzlage der letzten 48 Stunden
+          hours_to_show: 48
+          refresh_interval: 0
+        filter:
+          include:
+            - attributes:
+                data_list: '$$*'
+                url: '/feuerwehr-krems/'
+
+      - type: markdown
+        content: |-
+          Der Graph zeigt die **Anzahl der Einträge je Sensor** über die Zeit
+          (Zustand = Anzahl der Zeilen in `data_list`). Ein Sprung bedeutet also
+          einen neuen Einsatz bzw. eine neue Meldung. Für saubere Langzeitwerte
+          fehlt den Sensoren eine Einheit (`unit_of_measurement`) - deshalb
+          `history-graph` und **nicht** `statistics-graph`.
+
+      - type: custom:auto-entities
+        show_empty: true
+        card:
+          type: custom:flex-table-card
+          title: Abgeschlossene Einsätze (Meldungen der Quelle)
+          enable_search: true
+          display_footer: true
+          columns:
+            - name: Kat.
+              data: data_list
+              modify: >-
+                (function () { var t = x[4] || ''; var p = t.toUpperCase().indexOf('SOF') === 0 ? 'SOF' : t.charAt(0).toUpperCase(); var c = {B: '#c62828', T: '#ef6c00', S: '#6a1b9a', SOF: '#00838f', U: '#546e7a'}[p] || '#607d8b'; return '<span style="display:inline-block;min-width:2.4em;text-align:center;padding:0 5px;border-radius:6px;color:#fff;font-weight:600;font-size:.85em;background:' + c + '">' + p + '</span>'; })()
+              id: kat
+            - name: Einsatzart
+              data: data_list
+              modify: x[4]
+              id: art
+            - name: Gemeinde
+              data: data_list
+              modify: x[3]
+              id: gemeinde
+            - name: Alarmzentrale
+              data: data_list
+              modify: x[2]
+              id: alarmzentrale
+            - name: Datum
+              data: data_list
+              modify: x[0]
+              id: datum
+              footer_type: count
+            - name: Zeit
+              data: data_list
+              modify: x[1]
+              id: zeit
+        filter:
+          include:
+            - attributes:
+                data_list: '$$*'
+                url: '/Land_EinsatzHistorie/'
+
+  # ===========================================================================
+  # 5) KARTE - groß + Alternativen ohne Zusatz-Code
+  # ===========================================================================
+  - title: Karte
+    path: karte
+    icon: mdi:map-marker-radius
+    type: masonry
+    cards:
+      - type: map
+        title: Aktive Einsätze (Marker je Gemeinde)
+        aspect_ratio: '75%'
+        default_zoom: 9
+        auto_fit: true
+        theme_mode: auto
+        cluster: true
+        hours_to_show: 0
+        geo_location_sources:
+          - source: fire_department
+            label_mode: name
+
+      - type: markdown
+        title: Was zeigt diese Karte?
+        content: |-
+          * Jeder **aktive Einsatz** ist ein eigener Marker
+            (`geo_location`, `source: fire_department`), benannt nach
+            `Einsatzart · Gemeinde`.
+          * Position = **Zentrum der Gemeinde** aus OpenStreetMap (die Quelle
+            WASTL liefert keine Koordinaten). Mehrere Einsätze am selben Ort
+            werden geclustert - Klick auf den Cluster zoomt heran.
+          * Der Zustand eines Markers ist die **Entfernung von zuhause in
+            Metern** - praktisch für `label_mode: state` oder für Automatisierungen.
+          * Kartenkacheln: OSM über die System-Integration **`map_tiles`**
+            (ab Home Assistant 2026.9 im Kern, proxyt die OSM-Kacheln über die
+            eigene Instanz, Token-geschützt, kein API-Key, kostenlos).
+          * Ohne Internet/ohne Geocoding gibt es keine Marker - dann bleiben
+            die beiden Karten unten als Fallback.
+
+      # Fallback 1: die Original-Einsatzkarte der Quelle (iframe)
+      - type: iframe
+        title: WASTL Einsatzkarte der Quelle
+        url: https://www.feuerwehr-krems.at/CodePages/Wastl/wastlmain/ShowOverview.asp
+        aspect_ratio: '75%'
+
+      # Fallback 2: reine OpenStreetMap-Einbettung (frei, ohne API-Key)
+      # Der OSM-Embed kann nur EINEN Marker darstellen -> hier als Regionskarte.
+      - type: iframe
+        title: Niederösterreich auf OpenStreetMap
+        url: https://www.openstreetmap.org/export/embed.html?bbox=14.40%2C47.40%2C17.10%2C49.05&layer=mapnik
+        aspect_ratio: '55%'
