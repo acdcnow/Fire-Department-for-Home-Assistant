@@ -722,7 +722,18 @@ def test_manifest() -> None:
     equal(manifest["requirements"], [], "no external requirements")
     check("acdcnow/fire-department-for-Home-Assistant" in manifest["documentation"], "documentation link")
     check("acdcnow/fire-department-for-Home-Assistant" in manifest["issue_tracker"], "issue tracker link")
-    check(manifest["version"].startswith("3.0.0"), "version")
+    version = manifest["version"]
+    check(
+        re.fullmatch(r"\d+\.\d+\.\d+", version) is not None,
+        f"version is a plain X.Y.Z release (got {version!r})",
+    )
+    changelog = (base / "CHANGELOG.md").read_text(encoding="utf-8")
+    heading = re.search(r"^## (\d+\.\d+\.\d+) - ", changelog, re.MULTILINE)
+    equal(
+        heading.group(1) if heading else None,
+        version,
+        "CHANGELOG newest version matches the manifest",
+    )
     equal(hacs["homeassistant"], "2026.9.0", "minimum Home Assistant version")
     equal(hacs["country"], "AT", "country")
     for size in ("icon.png", "icon@2x.png", "logo.png", "logo@2x.png"):
