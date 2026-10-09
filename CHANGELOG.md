@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 Tags in this repository have no `v` prefix.
 
+## 3.0.1 - 2026-10-09
+
+### Changed
+
+* **New brand image.** The icon and logo shown for the integration in Home Assistant
+  and HACS now use the Austrian fire service artwork. `brand/icon.png` (256x256),
+  `brand/icon@2x.png` (512x512), `brand/logo.png` (512x160) and `brand/logo@2x.png`
+  (1024x320) were replaced.
+
 ## 3.0.0 - 2026-09-24
 
 Everything from `3.0.0-beta.1`, nothing breaking on top of it, plus a ready made

@@ -1,7 +1,7 @@
 # Fire Department Austria
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![version](https://img.shields.io/badge/version-3.0.0--beta.1-blue.svg)](https://github.com/acdcnow/fire-department-for-Home-Assistant/releases)
+[![version](https://img.shields.io/badge/version-3.0.1-blue.svg)](https://github.com/acdcnow/fire-department-for-Home-Assistant/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
