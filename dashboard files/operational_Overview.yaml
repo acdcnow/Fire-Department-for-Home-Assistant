@@ -1,10 +1,32 @@
+# Operational overview map of the WASTL network (Lower Austria only).
+# Upper Austria: https://einsaetze.ooelfv.at/einsatzkarte
+# Styria:        https://einsatzuebersicht.lfv.steiermark.at/lfvasp/einsatzkarte/Karte_App_Public.html?Bereich=all
 type: grid
 cards:
   - type: iframe
     url: https://www.feuerwehr-krems.at/CodePages/Wastl/wastlmain/ShowOverview.asp
     aspect_ratio: 100%
-    title: Operational Overview
+    title: Operational overview (Lower Austria)
     grid_options:
       columns: 18
       rows: 8
+  - type: markdown
+    title: 🧭 Legend
+    content: >
+      Colours follow the colour scheme of the integration (default: severity).
+
+      {% set colors = state_attr('sensor.fire_department_active_operations', 'color_legend') or {} %}
+
+      {% for name, color in colors.items() %}
+      <span style="display:inline-block;background:{{ color }};color:#fff;border-radius:4px;padding:1px 6px;margin-right:4px">{{ name }}</span>
+      {% endfor %}
+
+      {% set categories = state_attr('sensor.fire_department_active_operations', 'by_category') or {} %}
+
+      {% for name, count in categories.items() %}
+      <br>{{ name }}: {{ count }}
+      {% endfor %}
+    grid_options:
+      columns: 18
+      rows: auto
 column_span: 2

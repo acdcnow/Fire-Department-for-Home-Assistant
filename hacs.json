@@ -1,6 +1,6 @@
 {
-  "name": "Fire Department Info",
+  "name": "Fire Department Austria",
   "render_readme": true,
-  "homeassistant": "2026.1.0",
-  "country": "AT"
+  "country": "AT",
+  "homeassistant": "2026.9.0"
 }

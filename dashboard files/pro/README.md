@@ -1,10 +1,11 @@
-# Feuerwehr NÖ · Pro dashboard
+# Feuerwehr Österreich · Pro dashboard
 
-A ready-to-paste Lovelace dashboard for the *Fire Department Info* integration,
-plus the map markers that make the built-in Home Assistant map work.
+A complete, ready-to-paste Lovelace dashboard for **Fire Department Austria 3.x**,
+plus the map markers that make the built-in Home Assistant map show the current
+situation.
 
-> UI labels are German because the WASTL source data is German
-> (`Einsatzart`, `Gemeinde`, `Alarmzentrale`). Rename them freely.
+> UI labels are German because the sources are German (`Einsatzart`, `Gemeinde`,
+> `Alarmzentrale`). Rename them freely.
 
 ---
 
@@ -12,11 +13,14 @@ plus the map markers that make the built-in Home Assistant map work.
 
 | View | Content |
 | :--- | :--- |
-| **Leitstelle** | KPI tiles (active operations / brigades / completed), live map, group breakdown by *Einsatzart* and *Top-Gemeinden*, the 6 newest operations, data-source freshness |
-| **Aktive Einsätze** | Full table: searchable, sortable, colour-coded category badges, row-count footer |
-| **Feuerwehren im Einsatz** | One row per brigade and operation |
-| **Historie** | 48 h history graph of all sensors + table of the completed operations |
-| **Karte** | Large marker map + two iframe fallbacks (WASTL's own map, plain OpenStreetMap) |
+| **Leitstelle** | KPI tiles (running missions, brigades, finished 24 h), live map, group bars by *Einsatzart* and *Bezirk*, colour legend + data freshness, newest missions |
+| **Laufende Einsätze** | Full table: search, sortable headers, colour-coded alarm badges, row counter, unit count |
+| **Feuerwehren** | One row per brigade and mission (with the brigade number of the source) |
+| **Historie** | 24 h graph of all sensors + table of finished missions with duration |
+| **Karte** | Large marker map + WASTL's own map and plain OpenStreetMap as iframe fallbacks |
+
+Every view works for **one or several federal states at once** - the numbers on the
+overview are summed over all configured entries.
 
 ## 2. Requirements
 
@@ -32,7 +36,7 @@ Everything else is built in: `map`, `history-graph`, `iframe`, `markdown`.
 ## 3. Installation
 
 1. Settings → Dashboards → **+ Add dashboard** → *New dashboard from scratch*
-   → title `Feuerwehr NÖ` → create → open it.
+   → title `Feuerwehr Österreich` → create → open it.
 2. Top-right menu → **Edit dashboard** → **Raw configuration editor**
    → paste the content of `fire_department_pro.yaml` → **Save**.
 
@@ -44,125 +48,91 @@ lovelace:
   dashboards:
     feuerwehr:
       mode: yaml
-      title: Feuerwehr NÖ
+      title: Feuerwehr Österreich
       icon: mdi:fire-station
       show_in_sidebar: true
       filename: dashboards/fire_department.yaml
 ```
 
-## 4. How the integration data looks (verified against the live pages)
+## 4. Why no entity ids appear in the file
 
-Every sensor carries the raw parsed rows in the `data_list` attribute:
-
-| Index | Active operations / history | Deployed brigades |
-| :--- | :--- | :--- |
-| `0` | `23.09.2026` (date) | date |
-| `1` | `< 1 std.` / `21:09:00` (time) | time |
-| `2` | `Alarmzentrale` or `BAZ Krems/Donau` | **brigade** (`Eichberg`) |
-| `3` | **municipality** (`Grossdietmanns`) | `-` |
-| `4` | **Einsatzart** (`T1 Bergung - PKW`) | Einsatzart |
-
-Sensors created by the integration (region *Lower Austria*):
-
-| Sensor | Meaning |
-| :--- | :--- |
-| `sensor.<name>_active_operations` / `..._aktuelle_einsatze` | number of current operations |
-| `sensor.<name>_deployed_fire_brigade` / `..._eingesetzte_feuerwehren` | number of deployed brigades |
-| `sensor.<name>_completed_missions` / `..._beendete_einsatze` | number of finished operations (rolling window of the source, currently 100 rows) |
-| `geo_location.*` | one map marker per active operation (new) |
-
-**Entity IDs are language dependent** (they follow the translated entity name).
-That is why the dashboard never hard-codes them: `auto-entities` selects the
-sensors by their attributes instead.
+Entity ids depend on the language and on the name you gave the entry, and there can be
+one entry per federal state. The dashboard therefore never hard-codes them - it selects
+the sensors by their attributes:
 
 ```yaml
 filter:
   include:
     - attributes:
-        data_list: '$$*'          # sensor has a parsed table
-        url: '/Land_EinsatzAktuell/'   # ... and it is this page
+        source_kind: active_operations     # or deployed_fire_brigade / completed_missions
 ```
+
+`source_kind` is one of the attributes added in 3.0.0 for exactly this purpose. The
+tables read the mission list from `incidents` (list of mission dictionaries) and reach
+into each row with `modify: x.<key>`.
 
 ## 5. Cards used and why
 
 | Requirement | Card | Reason |
 | :--- | :--- | :--- |
-| Big numbers | `mushroom-template-card` in a `grid` | readable at a glance, template driven |
-| Table with search/sort | `flex-table-card` | sortable headers, live search, 1000+ rows, row footer; `data_list` is a *list of lists*, which `flex-table-card` expands row-wise when every column selects the same array with `data: data_list` + `modify: x[n]` |
-| Colour-coded category | `modify:` (JS) inside a flex-table column | cells are rendered as HTML, so a styled `<span>` badge works |
-| Group breakdown | `markdown` + Jinja | no extra template sensors needed, recomputed on every state change |
-| Trend | `history-graph` | sensor state = number of rows; works without `state_unit`/long-term statistics (so **not** `statistics-graph`) |
+| Big numbers | `mushroom-template-card` in a `grid` | readable at a glance, sums over all entries |
+| Table with search/sort | `flex-table-card` | sortable headers, live search, row footer, hundreds of rows |
+| Colour-coded alarm | `modify:` (JS) inside a flex-table column | cells are rendered as HTML, so the badge takes the `color` attribute of the mission |
+| Group bars | `markdown` + Jinja | uses the `by_category` / `by_district` counters the integration already computes - no extra template sensors |
+| Trend | `history-graph` | the sensors have no `unit_of_measurement`, so `statistics-graph` would stay empty |
 | Map | built-in `map` | free OSM tiles via `map_tiles`, clustering, no API key |
-| External maps | `iframe` | WASTL's own map, or plain OSM as a fallback |
+| External maps | `iframe` | WASTL's own map, or plain OpenStreetMap as a fallback |
 
 ## 6. How to display the groups
 
-1. **By sensor** – one view per group (this dashboard). Native, fast, works on
-   mobile; the tab bar is the "group switcher".
-2. **By category (B / T / S / SOF / U)** – the `Kat.` badge column plus the
-   *Nach Einsatzart* bars. Clicking the `Kat.` header groups all rows of the
-   same category together.
-3. **By place** – the *Top-Gemeinden* bars answer "where is it burning right
-   now?"; clicking the `Gemeinde` or `Alarmzentrale` header groups the table, and
-   the search box filters live (e.g. `Zwettl`).
-4. **By time** – the table is already in source order (newest first); the
-   history graph covers the long-term view.
-
-Everything else (real grouped sub-tables per category/district) would need one
-entity per group, which the integration does not create – the row attribute can
-not be split by Lovelace cards. `sort_by` in `flex-table-card` +
-`enable_search: true` is the pragmatic equivalent.
+1. **By kind** - one view per sensor kind (this dashboard). Native, fast, works on
+   mobile; the tab bar is the group switcher.
+2. **By alarm keyword** - the `Alarm` badge column shows `B1`, `T03V`, `SOF1`, …
+   coloured with the mission colour; clicking the header groups them.
+3. **By place** - the *Nach Bezirk* bars answer "where is it busy right now?", the
+   `Gemeinde` column groups the table, and the search box filters live (e.g. `Zwettl`).
+4. **By mission type** - the *Nach Einsatzart* bars, or the integration's *Mission
+   types* filter if you only ever want to see fires.
+5. **By federal state** - the `Bundesland` column, plus the summed tiles on the
+   overview.
 
 ## 7. The map
 
-Three options, all free:
+```yaml
+type: map
+geo_location_sources:
+  - source: fire_department
+    label_mode: name      # name | state | attribute | icon
+auto_fit: true
+```
 
-1. **Built-in map card (recommended)** – uses the markers of the integration:
+* Every **running mission** is a `geo_location` entity, named `Alarm · Gemeinde`.
+* Position = **centre of the municipality**. The mission lists publish no coordinates,
+  so the town is looked up once at OpenStreetMap and cached; markers without a
+  resolvable town are simply left out.
+* Marker state = **distance from home in metres** (`label_mode: state`),
+  `label_mode: attribute` with `attribute: type` puts the mission type on the map.
+* Markers disappear as soon as a mission is finished.
+* Tiles: since **Home Assistant 2026.9** the `map_tiles` system integration serves the
+  base map - it proxies the OpenStreetMap tiles through your own instance behind a
+  rotating token and caches them. No API key, no request from your browser to a third
+  party.
 
-   ```yaml
-   type: map
-   geo_location_sources:
-     - source: fire_department
-       label_mode: name      # label_mode: name | state | attribute | icon
-   auto_fit: true
-   ```
+### Privacy
 
-   * Tiles: since **Home Assistant 2026.9** the system integration
-     **`map_tiles`** serves the map. It proxies the OpenStreetMap vector tiles
-     (`vector.openstreetmap.org`) through your own instance behind a rotating
-     access token and caches up to 32 MB in memory. No API key, no external
-     frontend request - the browser only talks to your HA instance.
-   * Markers: one `geo_location` entity per active operation, named
-     `Einsatzart · Gemeinde`, state = distance from home in metres.
-   * Position: the **centre of the municipality**. WASTL does not publish
-     coordinates, so the integration looks the municipality up in OpenStreetMap
-     and caches the result permanently.
-
-2. **WASTL's own map** (`https://www.feuerwehr-krems.at/CodePages/Wastl/wastlmain/ShowOverview.asp`)
-   as an `iframe` - the source's operational map, no coordinates needed.
-
-3. **Plain OpenStreetMap embed** as an `iframe`. Free and key-free, but the OSM
-   embed can only show **one** marker - that is why it is used as a region map:
-
-   ```
-   https://www.openstreetmap.org/export/embed.html?bbox=14.40,47.40,17.10,49.05&layer=mapnik
-   ```
-
-### Privacy / offline
-
-The geocoding asks `nominatim.openstreetmap.org` for municipality names that are
-not in the cache yet (throttled to one request per second, cached in
-`.storage/fire_department_geocoding`, also for "not found"). After the first few
-days it is effectively offline. To switch it off completely, set
-`GEOCODE_ENABLED = False` in `custom_components/fire_department/const.py` -
-the dashboard then simply shows no markers and the iframes remain.
+Lookups go to `nominatim.openstreetmap.org`, are throttled to one request per second and
+cached permanently (including "not found") in `.storage/fire_department_geocoding`.
+After the first few days it is effectively offline. Turn it off completely in
+**Configure → General settings → Map markers**; the map then stays empty and the
+iframes remain.
 
 ## 8. Troubleshooting
 
 | Symptom | Cause / fix |
 | :--- | :--- |
-| Table says *no entities* | `flex-table-card` not installed, or the entity was renamed so the `url` filter no longer matches |
-| Empty table cells | flex-table older than 1.4.0 - update via HACS |
-| No map markers | Geocoding disabled/offline, or the municipality is unknown; check the log (`debug` for `custom_components.fire_department`) |
-| Markers in the wrong place | the source name is ambiguous - add the correct name to `geocoding.py` / clear the cache entry in `.storage/fire_department_geocoding` |
-| KPI tile shows `–` | the integration is not set up or is still loading |
+| Table is shorter than the sensor state | The sensors expose at most *Missions in the attributes* rows (25 by default) - raise it in *General settings* (0 = counts only) |
+| "no entities" in a table | `flex-table-card`/`auto-entities` not installed, or the attribute filter matches nothing (check Developer tools → States) |
+| Empty cells | flex-table-card older than 1.4.0 - update via HACS |
+| No map markers | Map markers switched off, no internet, or the town is unknown to OpenStreetMap (check the log with `custom_components.fire_department` at debug level) |
+| Marker in the wrong place | The town name is ambiguous - add the correct name to `geocoding.py` or clear the entry in `.storage/fire_department_geocoding` |
+| KPI tile shows `0` | Entry not set up yet, or all its sensors are unavailable (see *Datenstand* card for the last error) |

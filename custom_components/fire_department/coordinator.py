@@ -1,150 +1,167 @@
-"""Shared data coordinator for the Fire Department integration.
+"""Data update coordinator for the Fire Department Austria integration."""
 
-The coordinator is created once per config entry in ``__init__.py`` so that the
-``sensor`` and the ``geo_location`` platform work on the very same scrape
-instead of fetching every page twice.
-"""
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import timedelta
 from typing import Any
 
-from bs4 import BeautifulSoup
-
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, KEY_ACTIVE_OPS, TYPE_DEPARTMENTS, TYPE_INCIDENTS
+from . import provider
+from .const import (
+    DOMAIN,
+    KIND_ACTIVE,
+    SIGNAL_INCIDENT_CLOSED,
+    SIGNAL_NEW_INCIDENT,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-REQUEST_TIMEOUT = 15
+FETCH_TIMEOUT = 20
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+USER_AGENT = (
+    "HomeAssistant-FireDepartment/3.0 "
+    "(+https://github.com/acdcnow/fire-department-for-Home-Assistant)"
+)
 
 
-class FireDeptCoordinator(DataUpdateCoordinator[dict[int, list[list[str]]]]):
-    """Fetch and parse all pages of a config entry."""
+class FireDepartmentCoordinator(DataUpdateCoordinator[dict[str, list[dict[str, Any]]]]):
+    """Fetch and parse all configured sources of one config entry.
+
+    Sources that share a URL are downloaded only once per refresh.
+    """
 
     def __init__(
-        self, hass: HomeAssistant, pages: list[dict[str, Any]], interval_minutes: int
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        sources: list[dict[str, Any]],
+        update_interval_minutes: int,
+        color_scheme: str,
+        categories: list[str],
+        max_items: int,
     ) -> None:
-        """Initialise the coordinator.
-
-        The shared Home Assistant aiohttp session is used on purpose: a session
-        created here would have to be closed again on every reload.
-        """
-        self.session = async_get_clientsession(hass)
-        self.pages = pages
+        """Initialise the coordinator."""
+        self.sources = sources
+        self.color_scheme = color_scheme
+        self.categories = categories
+        self.max_items = max_items
+        self.fetched_at = None
+        self.last_error: str | None = None
+        self.failed_sources: set[str] = set()
+        self._known_ids: dict[str, dict[str, dict]] = {}
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(minutes=interval_minutes),
+            name=f"{DOMAIN} {entry.title}",
+            config_entry=entry,
+            update_interval=timedelta(minutes=update_interval_minutes),
         )
 
-    @property
-    def active_operations_page(self) -> int | None:
-        """Return the index of the page holding the active operations."""
-        for idx, page in enumerate(self.pages):
-            if page.get("name") == KEY_ACTIVE_OPS:
-                return idx
-        # Fall back to the first incidents page for custom configured entries.
-        for idx, page in enumerate(self.pages):
-            if page.get("type") == TYPE_INCIDENTS:
-                return idx
-        return None
+    # ------------------------------------------------------------------ #
+    # fetching
+    # ------------------------------------------------------------------ #
+    async def _async_update_data(self) -> dict[str, list[dict[str, Any]]]:
+        """Download every distinct URL once and parse it per source."""
+        session = async_get_clientsession(self.hass)
+        documents: dict[str, str] = {}
+        failed: set[str] = set()
+        self.last_error = None
 
-    def active_operations(self) -> list[list[str]]:
-        """Return the parsed rows of the active operations page."""
-        idx = self.active_operations_page
-        if idx is None:
-            return []
-        return (self.data or {}).get(idx) or []
+        for url in dict.fromkeys(source["url"] for source in self.sources):
+            try:
+                documents[url] = await self._download(session, url)
+            except Exception as err:  # noqa: BLE001 - report, keep other sources alive
+                failed.add(url)
+                self.last_error = f"{url}: {type(err).__name__}: {err}"
+                _LOGGER.warning("Could not read %s: %s", url, err)
 
-    async def _async_update_data(self) -> dict[int, list[list[str]]]:
-        data: dict[int, list[list[str]]] = {}
-        for idx, page in enumerate(self.pages):
-            data[idx] = await self.fetch_and_parse(page["url"], page["type"])
+        self.failed_sources = {
+            source["id"] for source in self.sources if source["url"] in failed
+        }
+
+        data: dict[str, list[dict[str, Any]]] = {}
+        now = dt_util.now(provider.TZ)
+        for source in self.sources:
+            text = documents.get(source["url"])
+            if text is None:
+                continue
+            try:
+                rows = provider.parse_source(
+                    text, source, now, self.color_scheme, self.categories
+                )
+            except Exception as err:  # noqa: BLE001 - a broken parser must not kill the rest
+                self.last_error = f"{source['url']}: {type(err).__name__}: {err}"
+                _LOGGER.exception("Could not parse %s", source["url"])
+                continue
+            data[source["id"]] = provider.sort_rows(rows)
+
+        if not data:
+            raise UpdateFailed(
+                "No source could be read. " + (self.last_error or "Check the configured URLs.")
+            )
+
+        self.fetched_at = dt_util.utcnow()
+        self._notify_bus(data)
         return data
 
-    async def fetch_and_parse(self, url: str, p_type: str) -> list[list[str]]:
-        """Fetch a page and parse its table rows."""
-        data_list: list[list[str]] = []
-        try:
-            async with asyncio.timeout(REQUEST_TIMEOUT):
-                async with self.session.get(url) as response:
-                    text = await response.text(encoding="ISO-8859-1")
+    async def _download(self, session, url: str) -> str:
+        """Download one page and decode it."""
+        headers = {"User-Agent": USER_AGENT, "Cache-Control": "no-cache"}
+        async with asyncio.timeout(FETCH_TIMEOUT):
+            async with session.get(url, headers=headers, allow_redirects=True) as response:
+                if response.status != 200:
+                    raise UpdateFailed(f"HTTP {response.status} for {url}")
+                raw = await response.read()
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise UpdateFailed(f"response of {url} is unexpectedly large")
+        content_type = response.headers.get("Content-Type", "")
+        charset = None
+        if "charset=" in content_type:
+            charset = content_type.split("charset=")[-1].split(";")[0].strip()
+        return provider.decode_bytes(raw, charset)
 
-            soup = BeautifulSoup(text, "html.parser")
-            rows = soup.find_all("tr")
+    # ------------------------------------------------------------------ #
+    # automation events
+    # ------------------------------------------------------------------ #
+    def _notify_bus(self, data: dict[str, list[dict[str, Any]]]) -> None:
+        """Fire an event for every new / finished active mission.
 
-            for row in rows:
-                cols = row.find_all("td")
-                if len(cols) >= 3:
-                    raw_data = [ele.text.strip() for ele in cols]
+        The first refresh only primes the internal cache, so a Home Assistant
+        restart does not flood automations with events.
+        """
+        for source in self.sources:
+            if source["kind"] != KIND_ACTIVE:
+                continue
+            rows = data.get(source["id"])
+            if rows is None:
+                continue
+            key = source["id"]
+            current = {row["id"]: row for row in rows if row.get("id")}
+            previous = self._known_ids.get(key)
+            self._known_ids[key] = current
+            if previous is None:
+                continue
+            for row_id, row in current.items():
+                if row_id not in previous:
+                    self._fire(SIGNAL_NEW_INCIDENT, source, row)
+            for row_id, row in previous.items():
+                if row_id not in current:
+                    self._fire(SIGNAL_INCIDENT_CLOSED, source, row)
 
-                    # Skip Headers
-                    if not raw_data or "Zeit" in str(raw_data) or "Feuerwehr" in str(raw_data):
-                        continue
-
-                    formatted_row = self.process_row_smart(raw_data, p_type)
-                    if formatted_row:
-                        data_list.append(formatted_row)
-
-            return data_list
-        except Exception as err:  # noqa: BLE001 - keep one bad page from breaking all
-            _LOGGER.error("Error parsing %s: %s", url, err)
-            return []
-
-    def process_row_smart(self, row: list[str], p_type: str) -> list[str] | None:
-        """Smartly detect columns based on Time format."""
-        try:
-            # 1. Find the index of the Time column (contains :)
-            time_idx = -1
-            for i, col in enumerate(row):
-                if ":" in col or "std" in col.lower():  # Matches "12:00" or "< 1 std."
-                    time_idx = i
-                    break
-
-            if time_idx == -1:
-                return None  # No time found, invalid row
-
-            # 2. Extract relative to Time
-            raw_time = row[time_idx]
-            incident_type = row[time_idx - 1] if time_idx >= 1 else "-"
-
-            district = "-"
-            location = "-"
-
-            if p_type == TYPE_INCIDENTS:
-                # Layout: [Hidden] [District] [Location] [Type] [Time]
-                # If Time is at index 4: Type=3, Loc=2, Dist=1
-                location = row[time_idx - 2] if time_idx >= 2 else "-"
-                district = self.clean_text(row[time_idx - 3]) if time_idx >= 3 else "-"
-
-            elif p_type == TYPE_DEPARTMENTS:
-                # Layout: [Hidden] [Department] [Type] [Time]
-                # If Time is at index 3: Type=2, Dept=1
-                district = self.clean_text(row[time_idx - 2]) if time_idx >= 2 else "-"
-                location = "-"
-
-            date_str, time_str = self.split_datetime(raw_time)
-
-            return [date_str, time_str, district, location, incident_type]
-
-        except Exception:  # noqa: BLE001
-            return None
-
-    def clean_text(self, text: str) -> str:
-        """Remove leading numbers."""
-        return re.sub(r"^\d+\s*", "", text)
-
-    def split_datetime(self, raw_str: str) -> tuple[str, str]:
-        """Split Date and Time."""
-        match = re.search(r"(\d{2}\.\d{2}\.\d{4})\s*(.*)", raw_str)
-        if match:
-            return match.group(1), match.group(2)
-        return "-", raw_str
+    def _fire(self, signal: str, source: dict, row: dict) -> None:
+        self.hass.bus.async_fire(
+            signal,
+            {
+                "entry_id": self.config_entry.entry_id if self.config_entry else None,
+                "source": source["id"],
+                "region": source.get("region"),
+                "incident": row,
+            },
+        )

@@ -1,35 +1,29 @@
 type: markdown
-title: 🏁 Completed Missions
+title: 🕓 Mission history (24 h)
 content: >
-  <table>
+  {% set entity = 'sensor.fire_department_completed_missions' %}
 
-  <tr><th align="left">Date</th><th align="left">Time</th><th
-  align="left">District</th><th align="left">Location</th><th
-  align="left">Type</th></tr>
+  **Finished missions:** {{ states(entity) }}
 
-  {% set entity_id = 'sensor.fire_department_info_beendete_einsatze' %}
+  {% if state_attr(entity, 'average_duration') %}**Average duration:** {{
+  state_attr(entity, 'average_duration') }}{% endif %}
 
-  {% set data = state_attr(entity_id, 'data_list') %}
+  {% set missions = state_attr(entity, 'incidents') %}
 
-  {% if states(entity_id) not in ['unavailable', 'unknown'] and data %}
-
-  {% for row in data %}
-
+  {% if missions %}
+  <table width="100%">
+  <tr><th align="left">Time</th><th align="left">Alert</th><th align="left">Town</th><th align="left">Type</th><th align="left">Duration</th></tr>
+  {% for m in missions %}
   <tr>
-
-  <td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td><td>{{ row[3]
-  }}</td><td>{{ row[4] }}</td>
-
+    <td style="border-left: 6px solid {{ m.color or '#9ca3af' }}; padding-left: 6px">{{ m.time or m.date }}</td>
+    <td>{{ m.keyword or '' }}</td>
+    <td>{{ m.municipality }}{% if m.district %} ({{ m.district }}){% endif %}</td>
+    <td>{{ m.type }}</td>
+    <td>{{ m.duration_minutes ~ ' min' if m.duration_minutes else '-' }}</td>
   </tr>
-
   {% endfor %}
-
-  {% else %}
-
-  <tr><td colspan="5">No history data.</td></tr>
-
-  {% endif %}
-    </table>
+  </table>
+  {% else %}<i>No finished missions in the window.</i>{% endif %}
 grid_options:
   columns: 18
   rows: auto

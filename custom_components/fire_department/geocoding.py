@@ -1,16 +1,18 @@
-"""Resolve the municipality of an operation to coordinates.
+"""Resolve the municipality of a mission to coordinates.
 
-The WASTL pages do not publish any coordinates, so the municipality name has to
-be translated into a position before it can be shown on the built-in Home
-Assistant map (``geo_location`` platform).
+None of the Austrian mission lists publishes coordinates, so the town name has
+to be translated into a position before it can be shown on the built-in map
+(see :mod:`geo_location`).
 
-The lookups are cached persistently (also negative results) and throttled to at
-most one request per second, which is what the Nominatim usage policy asks for:
+Lookups are cached permanently - negative results included - and throttled to
+one request per second, which is what the Nominatim usage policy asks for:
 https://operations.osmfoundation.org/policies/nominatim/
 
-Set ``GEOCODE_ENABLED`` in ``const.py`` to ``False`` for a fully offline
-installation - the dashboard then simply shows no map markers.
+The map markers (and with them every lookup) can be switched off in the
+options, so an installation that does not want this external request never
+makes one.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -18,44 +20,54 @@ import logging
 import re
 import time
 
-import aiohttp
-
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
 
 from .const import (
-    GEOCODE_ENABLED,
+    GEOCODE_BLOCK_TIME,
+    GEOCODE_COUNTRY,
     GEOCODE_MIN_INTERVAL,
-    GEOCODE_REGION,
     GEOCODE_STORAGE_KEY,
     GEOCODE_STORAGE_VERSION,
+    GEOCODE_TIMEOUT,
     GEOCODE_URL,
     GEOCODE_USER_AGENT,
+    REGION_STATES,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-REQUEST_TIMEOUT = 10
-BLOCK_TIME = 600  # seconds to back off after 403/429
-STORAGE_SAVE_DELAY = 120
+#: written at most every two minutes, the cache lives in memory as well
+SAVE_DELAY = 120
 
 _PREFIX_RE = re.compile(r"^\s*(stadt|markt|marktgemeinde|gemeinde)\s+", re.IGNORECASE)
 _SUFFIX_RE = re.compile(r"[\s-]+(stadt|markt)\s*$", re.IGNORECASE)
+#: ``ss`` / ``SS`` - the sources fold the German sharp s whenever they feel like it
+_SS_RE = re.compile(r"s{2}", re.IGNORECASE)
 _CONNECTIVES = {
     "an", "am", "auf", "bei", "der", "die", "im", "in",
     "ob", "unter", "von", "vor", "zu", "zur", "zum",
 }
 
 
-def candidates(name: str) -> list[str]:
-    """Return plausible spellings for a municipality from the WASTL tables.
+def _is_shouting(text: str) -> bool:
+    """True for names published in capitals.
 
-    The source writes names in many shapes ("Grossdietmanns", "Stadt Gmünd",
-    "GöPFRITZ AN DER WILD", "Zwettl-Stadt"), so a couple of variants are tried
-    before a lookup is stored as "not found".
+    ``str.isupper()`` is not enough here: the letter ``ß`` counts as lower case,
+    so a name like ``WEISSENKIRCHEN`` would slip through in its ``ß`` spelling.
     """
-    base = name.strip()
+    return not any(char.islower() and char not in "ß" for char in text)
+
+
+def candidates(municipality: str) -> list[str]:
+    """Return plausible spellings for a municipality name.
+
+    The sources write town names in very different shapes (``Grossdietmanns``,
+    ``Stadt Gmünd``, ``GöPFRITZ AN DER WILD``, ``Zwettl-Stadt``), so a couple of
+    variants are tried before a lookup is stored as "not found".
+    """
+    base = municipality.strip()
     if not base:
         return []
 
@@ -64,20 +76,33 @@ def candidates(name: str) -> list[str]:
     variants = [cleaned]
     if cleaned != base:
         variants.append(base)
-    if "ss" in cleaned:
-        # WASTL points out "Grossdietmanns", OSM knows "Großdietmanns".
-        variants.append(cleaned.replace("ss", "ß"))
+    if _SS_RE.search(cleaned):
+        # WASTL writes "Grossdietmanns", OpenStreetMap knows "Großdietmanns".
+        variants.append(_SS_RE.sub("ß", cleaned))
 
     result: list[str] = []
     for variant in variants:
-        if variant.isupper():
+        if _is_shouting(variant):
             variant = " ".join(
-                word.lower() if idx and word.lower() in _CONNECTIVES else word.capitalize()
-                for idx, word in enumerate(variant.split())
+                word.lower() if index and word.lower() in _CONNECTIVES else word.capitalize()
+                for index, word in enumerate(variant.split())
             )
         if variant and variant not in result:
             result.append(variant)
     return result
+
+
+def query_parameters(municipality: str, region: str | None = None) -> dict[str, str]:
+    """Nominatim query parameters for one municipality of a federal state."""
+    state = REGION_STATES.get(region or "")
+    query = ", ".join(part for part in (municipality, state, GEOCODE_COUNTRY) if part)
+    return {
+        "q": query,
+        "format": "jsonv2",
+        "limit": "1",
+        "countrycodes": "at",
+        "addressdetails": "0",
+    }
 
 
 class MunicipalityGeocoder:
@@ -95,6 +120,11 @@ class MunicipalityGeocoder:
         self._blocked_until = 0.0
         self._loaded = False
 
+    @property
+    def cache(self) -> dict[str, list[float] | None]:
+        """Known lookups, including the ones that were not found."""
+        return self._cache
+
     async def async_load(self) -> None:
         """Load the persistent cache once."""
         if self._loaded:
@@ -104,21 +134,23 @@ class MunicipalityGeocoder:
         if isinstance(stored, dict):
             self._cache = stored
 
-    async def async_lookup(self, municipality: str) -> tuple[float, float] | None:
-        """Return (latitude, longitude) for a municipality, if it is known."""
-        if not GEOCODE_ENABLED or not municipality or municipality == "-":
+    async def async_lookup(
+        self, municipality: str | None, region: str | None = None
+    ) -> tuple[float, float] | None:
+        """Return ``(latitude, longitude)`` for a municipality, if it is known."""
+        if not municipality or municipality == "-":
             return None
 
-        key = municipality.strip().casefold()
+        key = f"{region or 'at'}|{municipality.strip().casefold()}"
         await self.async_load()
 
         if key in self._cache:
             cached = self._cache[key]
             return (cached[0], cached[1]) if cached else None
 
-        coords = await self._async_geocode(municipality)
+        coords = await self._async_geocode(municipality, region)
         self._cache[key] = [coords[0], coords[1]] if coords else None
-        self._store.async_delay_save(lambda: self._cache, STORAGE_SAVE_DELAY)
+        self._store.async_delay_save(lambda: self._cache, SAVE_DELAY)
         return coords
 
     async def _throttle(self) -> None:
@@ -128,8 +160,10 @@ class MunicipalityGeocoder:
             await asyncio.sleep(wait)
         self._last_request = time.monotonic()
 
-    async def _async_geocode(self, municipality: str) -> tuple[float, float] | None:
-        """Query Nominatim for every plausible spelling of the name."""
+    async def _async_geocode(
+        self, municipality: str, region: str | None
+    ) -> tuple[float, float] | None:
+        """Ask Nominatim for every plausible spelling of the name."""
         async with self._lock:
             session = async_get_clientsession(self._hass)
             for candidate in candidates(municipality):
@@ -138,42 +172,33 @@ class MunicipalityGeocoder:
 
                 await self._throttle()
                 try:
-                    async with asyncio.timeout(REQUEST_TIMEOUT):
-                        response = await session.get(
+                    async with asyncio.timeout(GEOCODE_TIMEOUT):
+                        async with session.get(
                             GEOCODE_URL,
-                            params={
-                                "q": f"{candidate}, {GEOCODE_REGION}",
-                                "format": "jsonv2",
-                                "limit": 1,
-                                "countrycodes": "at",
-                                "addressdetails": 0,
-                            },
+                            params=query_parameters(candidate, region),
                             headers={"User-Agent": GEOCODE_USER_AGENT},
-                        )
-                        if response.status in (403, 429):
-                            _LOGGER.warning(
-                                "Nominatim refused the lookup (%s); pausing geocoding "
-                                "for %s seconds",
-                                response.status,
-                                BLOCK_TIME,
+                        ) as response:
+                            status = response.status
+                            payload = (
+                                await response.json(content_type=None) if status == 200 else None
                             )
-                            self._blocked_until = time.monotonic() + BLOCK_TIME
-                            return None
-                        if response.status != 200:
-                            _LOGGER.debug(
-                                "Unexpected geocoding status %s for %s",
-                                response.status,
-                                candidate,
-                            )
-                            continue
-                        payload = await response.json(content_type=None)
-                except (TimeoutError, aiohttp.ClientError) as err:
+                except Exception as err:  # noqa: BLE001 - one failed lookup is not fatal
                     _LOGGER.debug("Geocoding %s failed: %s", candidate, err)
                     continue
 
+                if status in (403, 429):
+                    _LOGGER.warning(
+                        "Nominatim refused the lookup (%s); pausing geocoding for %s seconds",
+                        status,
+                        GEOCODE_BLOCK_TIME,
+                    )
+                    self._blocked_until = time.monotonic() + GEOCODE_BLOCK_TIME
+                    return None
+                if status != 200:
+                    _LOGGER.debug("Unexpected geocoding status %s for %s", status, candidate)
+                    continue
                 if not isinstance(payload, list) or not payload:
                     continue
-
                 try:
                     return (float(payload[0]["lat"]), float(payload[0]["lon"]))
                 except (KeyError, TypeError, ValueError):
