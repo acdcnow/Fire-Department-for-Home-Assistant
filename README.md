@@ -118,8 +118,8 @@ network or other lists in the same format can be added:
 
 | Parser | Expected table |
 | --- | --- |
-| `wastl_incidents` | `[icon] | control centre | town | alert text | DD.MM.YYYY [HH:MM]` |
-| `wastl_units` | `[icon] | brigade number + town | alert text | DD.MM.YYYY < 1 std.` |
+| `wastl_incidents` | `[icon] \| control centre \| town \| alert text \| DD.MM.YYYY [HH:MM]` |
+| `wastl_units` | `[icon] \| brigade number + town \| alert text \| DD.MM.YYYY < 1 std.` |
 | `ooe` | colour chip + `town (district): alert text` with one `<li>` per brigade |
 | `stmk_csv` | `date;assigned_units;tycod;s_name;esz;dgroup;sub_tycod` |
 
