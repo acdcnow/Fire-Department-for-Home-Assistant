@@ -18,6 +18,7 @@ from typing import Any
 from homeassistant.components.geo_location import GeolocationEvent
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.location import distance
 
@@ -108,7 +109,7 @@ class MissionMarkerManager:
         for key, entity in list(self.entities.items()):
             if key not in wanted:
                 self.entities.pop(key)
-                await entity.async_remove()
+                await self._async_discard(entity)
 
         new_entities: list[FireDepartmentMissionMarker] = []
         for key, (source, row) in wanted.items():
@@ -132,6 +133,28 @@ class MissionMarkerManager:
 
         if new_entities:
             self.async_add_entities(new_entities)
+
+    async def _async_discard(self, entity: FireDepartmentMissionMarker) -> None:
+        """Take one marker off the map for good.
+
+        A plain ``Entity.async_remove()`` would leave an ``unavailable`` state
+        with ``restored: true`` in the state machine and keep the entity
+        registry entry of the marker forever.  Markers come and go all day long,
+        so both would pile up: hundreds of dead ``geo_location`` entities whose
+        state is written once more on every Home Assistant start - enough of
+        them and slow websocket clients are disconnected ("Client unable to keep
+        up with pending messages. Reached 4096 pending messages").
+
+        The marker is therefore removed the way Home Assistant removes its own
+        feed entities (``force_remove``) and its registry entry is dropped as
+        well.  Should the very same mission show up again, Home Assistant gives
+        the new entity back the entity id it had before.
+        """
+        entity_id = entity.entity_id
+        await entity.async_remove(force_remove=True)
+        registry = er.async_get(self.hass)
+        if entity_id and registry.async_get(entity_id) is not None:
+            registry.async_remove(entity_id)
 
 
 class FireDepartmentMissionMarker(FireDepartmentEntity, GeolocationEvent):

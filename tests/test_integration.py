@@ -61,10 +61,18 @@ def equal(actual, expected, message: str) -> None:
 
 
 class Collector(list):
-    """List that doubles as the ``async_add_entities`` callback."""
+    """List that doubles as the ``async_add_entities`` callback.
+
+    Entities are registered the way the entity platform registers them, so the
+    tests can look at the entity id and the entity registry entry Home Assistant
+    gives them.
+    """
 
     def __call__(self, entities):
-        self.extend(entities if isinstance(entities, (list, tuple)) else [entities])
+        added = entities if isinstance(entities, (list, tuple)) else [entities]
+        for entity in added:
+            ha_stub.add_entity(entity)
+        self.extend(added)
 
 
 def make_options_flow(hass, entry):
@@ -163,6 +171,32 @@ def test_parser_lower_austria_units() -> None:
     equal(rows[0]["municipality"], "Musterdorf", "municipality")
     equal(rows[1]["category"], "technical", "category of T1")
     equal(rows[0]["kind"], const.KIND_UNITS, "kind")
+
+
+def test_parser_wastl_ids_survive_the_relative_age() -> None:
+    """The age next to the date grows, the id of the mission must not."""
+    print("\n[parser] WASTL ids do not follow the relative age")
+    active = dict(const.SOURCES["noe_active"])
+    before = P.decode_bytes(wastl_document("wastl_aktuell.html"), None)
+    # the same page a few hours later: only the age text has moved on
+    after = before.replace("&lt; 1 std.", "~ 3 std.").replace("~ 2 std.", "~ 7 std.")
+    before_rows = P.parse_source(before, active, datetime.now(P.TZ))
+    after_rows = P.parse_source(after, active, datetime.now(P.TZ))
+    equal([row["age"] for row in after_rows], ["~ 3 std.", "~ 3 std.", "~ 7 std."], "age text moved on")
+    equal(
+        {row["municipality"]: row["id"] for row in after_rows},
+        {row["municipality"]: row["id"] for row in before_rows},
+        "same mission ids",
+    )
+
+    units = dict(const.SOURCES["noe_units"])
+    before_units = P.decode_bytes(wastl_document("wastl_ffim.html"), None)
+    after_units = before_units.replace("< 1 std.", "~ 4 std.")
+    equal(
+        [row["id"] for row in P.parse_source(after_units, units, datetime.now(P.TZ))],
+        [row["id"] for row in P.parse_source(before_units, units, datetime.now(P.TZ))],
+        "same brigade ids",
+    )
 
 
 def test_parser_lower_austria_history() -> None:
@@ -849,6 +883,20 @@ def test_map_markers() -> None:
             "finished mission removes its marker",
         )
         equal(len(markers), 3, "no new marker yet")
+
+        # the marker goes for good: no unavailable state, no dead registry entry
+        finished = next(marker for marker in markers if getattr(marker, "removed", False))
+        check(finished.removed_forcefully, "the state is dropped instead of turning unavailable")
+        check(finished.entity_id.startswith("geo_location."), "marker got an entity id")
+        check(hass.states.get(finished.entity_id) is None, "no restored state left behind")
+        check(
+            ha_stub.entity_registry(hass).async_get(finished.entity_id) is None,
+            "no dead entity registry entry left behind",
+        )
+        check(
+            ha_stub.entity_registry(hass).async_get(markers[1].entity_id) is not None,
+            "the running missions are still registered",
+        )
 
         # ... and a new mission adds one
         new_row = dict(remaining[0])

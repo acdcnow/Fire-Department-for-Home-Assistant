@@ -8,6 +8,7 @@ entities of a plain Python interpreter.
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import types
 from datetime import timedelta
@@ -299,6 +300,123 @@ device_registry = _attr(
 )
 
 
+# --------------------------------------------------------------------------- #
+# entity registry / state machine
+# --------------------------------------------------------------------------- #
+def slugify(name: str) -> str:
+    """Turn a name into an object id, the way Home Assistant does."""
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+class FakeRegistryEntry:
+    """Minimal entity registry entry."""
+
+    def __init__(self, entity_id: str, domain: str, platform: str, unique_id: str):
+        self.entity_id = entity_id
+        self.domain = domain
+        self.platform = platform
+        self.unique_id = unique_id
+        self.disabled = False
+        self.disabled_by = None
+
+
+class FakeEntityRegistry:
+    """Minimal entity registry - add, look up, remove."""
+
+    def __init__(self, hass: FakeHass):
+        self.hass = hass
+        self.entities: dict[str, FakeRegistryEntry] = {}
+
+    def async_get(self, entity_id: str) -> FakeRegistryEntry | None:
+        return self.entities.get(entity_id)
+
+    def async_get_or_create(
+        self, domain: str, platform: str, unique_id: str, *, entity_id: str | None = None, **kwargs
+    ) -> FakeRegistryEntry:
+        for entry in self.entities.values():
+            if (entry.domain, entry.platform, entry.unique_id) == (domain, platform, unique_id):
+                return entry
+        entry = FakeRegistryEntry(
+            entity_id or f"{domain}.{slugify(unique_id)}", domain, platform, unique_id
+        )
+        self.entities[entry.entity_id] = entry
+        return entry
+
+    def async_remove(self, entity_id: str) -> None:
+        """Drop an entry.  Home Assistant also removes the state of a live entity."""
+        self.entities.pop(entity_id, None)
+
+
+def async_get_entity_registry(hass: FakeHass) -> FakeEntityRegistry:
+    """The (lazily created) entity registry of a hass instance."""
+    registry = getattr(hass, "entity_registry", None)
+    if registry is None:
+        registry = FakeEntityRegistry(hass)
+        hass.entity_registry = registry
+    return registry
+
+
+def entity_registry(hass: FakeHass) -> FakeEntityRegistry:
+    """Test helper: the entity registry of a hass instance."""
+    return async_get_entity_registry(hass)
+
+
+entity_registry_module = _attr(
+    _module("homeassistant.helpers.entity_registry"),
+    async_get=async_get_entity_registry,
+    EntityRegistry=FakeEntityRegistry,
+)
+
+
+def add_entity(entity) -> None:
+    """Stand-in for the entity platform - id the entity and register it.
+
+    Entities with a unique id are put into the entity registry and get their
+    entity id from the platform.  Entities without one are not registered and
+    may not carry a device: Home Assistant logs about that today and refuses it
+    from 2027.8 on.
+    """
+    hass = entity.hass
+    registry = async_get_entity_registry(hass)
+    name = entity.name or "unknown"
+    entity_id = entity.entity_id
+    if entity_id is None:
+        base = slugify(name) or "unknown"
+        entity_id, index = f"{entity.domain}.{base}", 2
+        while registry.async_get(entity_id) is not None:
+            entity_id = f"{entity.domain}.{base}_{index}"
+            index += 1
+    entity.entity_id = entity_id
+    if entity.unique_id is None:
+        if entity.device_info is not None:
+            raise AssertionError(
+                f"{entity_id} attaches a device without having a unique id, Home Assistant rejects that"
+            )
+        entity.registry_entry = None
+    else:
+        entity.registry_entry = registry.async_get_or_create(
+            entity.domain, "fire_department", entity.unique_id, entity_id=entity_id
+        )
+    hass.states.async_set(entity_id, "unknown", {"friendly_name": name})
+
+
+class FakeStates:
+    """Minimal state machine."""
+
+    def __init__(self) -> None:
+        self.states: dict[str, dict] = {}
+
+    def async_set(self, entity_id: str, state: str, attributes: dict | None = None) -> None:
+        self.states[entity_id] = {"state": state, "attributes": dict(attributes or {})}
+
+    def async_remove(self, entity_id: str, context=None) -> bool:
+        return self.states.pop(entity_id, None) is not None
+
+    def get(self, entity_id: str) -> dict | None:
+        """The stored state, or ``None`` (= not in the state machine)."""
+        return self.states.get(entity_id)
+
+
 def async_get_clientsession(hass):
     return hass.session
 
@@ -500,6 +618,9 @@ class SensorStateClass:
 class SensorEntity:
     """Minimal sensor."""
 
+    domain = "sensor"  # stands in for platform.domain
+    entity_id = None
+    registry_entry = None
     _attr_has_entity_name = False
     _attr_should_poll = True
     _attr_state_class = None
@@ -542,6 +663,8 @@ class BinarySensorDeviceClass:
 class BinarySensorEntity(SensorEntity):
     """Minimal binary sensor."""
 
+    domain = "binary_sensor"
+
     @property
     def is_on(self):
         return False
@@ -561,6 +684,9 @@ components.binary_sensor = binary_sensor_module
 class GeolocationEvent:
     """Minimal stand-in for homeassistant.components.geo_location.GeolocationEvent."""
 
+    domain = "geo_location"  # stands in for platform.domain
+    entity_id = None
+    registry_entry = None
     _attr_should_poll = True
     _attr_source = None
     _attr_distance = None
@@ -615,8 +741,21 @@ class GeolocationEvent:
     async def async_added_to_hass(self):
         return None
 
-    async def async_remove(self):
+    async def async_remove(self, *, force_remove: bool = False):
+        """Stand-in for Entity.async_remove.
+
+        An entity that is in the entity registry keeps its entry and gets an
+        ``unavailable`` state with ``restored: true``; anything else (and every
+        forced removal) just drops the state.
+        """
         self.removed = True
+        self.removed_forcefully = force_remove
+        if self.entity_id is None:
+            return
+        if not force_remove and self.registry_entry is not None:
+            self.hass.states.async_set(self.entity_id, "unavailable", {"restored": True})
+            return
+        self.hass.states.async_remove(self.entity_id)
 
     def async_write_ha_state(self):
         return None
@@ -680,6 +819,7 @@ class FakeHass:
         self.config_entries = FakeConfigEntries()
         self.config = FakeConfig()
         self.session = session or Session({})
+        self.states = FakeStates()
         self.data: dict = {}
         self.loop = None
         self.tasks: list = []

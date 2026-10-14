@@ -3,6 +3,25 @@
 All notable changes to this project are documented in this file.
 Tags in this repository have no `v` prefix.
 
+## 3.0.2 - 2026-10-14
+
+### Fixed
+
+* **A running mission keeps its marker.** The id of a mission row no longer contains the
+  relative age the alerting pages print next to the date (`14.10.2026 < 1 std.`). That
+  text grows while a mission is running, so the very same mission looked like a new one
+  as soon as it crossed an hour: its `geo_location` marker was dropped and created again
+  (each new one ended up as `geo_location.fire_department_info_..._2`, `_3`, ...) and the
+  `fire_department_new_incident` / `fire_department_incident_closed` events fired again
+  for a mission that had not changed at all.
+* **Markers no longer leave dead entities behind.** A marker that disappears now has its
+  state removed and its entity registry entry dropped instead of staying in the registry
+  as an `unavailable` entity with `restored: true`. Before, every mission ever seen kept
+  an entry forever, so Home Assistant wrote an `unavailable` state for all of them again
+  on every start - with a busy district that adds up to thousands of entities and enough
+  websocket traffic to get slow clients disconnected
+  (`Client unable to keep up with pending messages. Reached 4096 pending messages`).
+
 ## 3.0.1 - 2026-10-09
 
 ### Changed

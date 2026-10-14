@@ -298,6 +298,21 @@ def _wastl_moment(raw: str) -> tuple[str | None, str | None]:
     return None, clean_text(text[match.end() :]) or None
 
 
+def _wastl_stamp(raw: str) -> str:
+    """The stable part of a WASTL date cell.
+
+    The "aktuell" pages print ``14.10.2026 < 1 std.`` - the relative age grows
+    while a mission is running and changes the text of the cell (``< 1 std.``
+    -> ``~ 1 std.`` -> ``~ 3 std.``).  Only the date/time part may end up in a
+    row id: with the age in it the very same mission looks like a new one every
+    hour, which gives it a new ``geo_location`` entity (and a new "new mission"
+    automation event) each time.
+    """
+    text = clean_text(raw)
+    match = _WASTL_TS_RE.search(text)
+    return match.group(0) if match else text
+
+
 def _ooe_moment(text: str, now: datetime) -> str | None:
     """``"19.09. 15:12"`` -> ISO timestamp (the year is guessed)."""
     match = _OOE_TS_RE.search(clean_text(text))
@@ -516,7 +531,12 @@ def parse_wastl_incidents(
         letters, keyword, level = split_keyword(alert_type)
         date_match = _DATE_DE_RE.search(stamp)
         incident = {
-            "id": make_id(source.get("id"), stamp, cells[index - 2] if index >= 2 else None, alert_type),
+            "id": make_id(
+                source.get("id"),
+                _wastl_stamp(stamp),
+                cells[index - 2] if index >= 2 else None,
+                alert_type,
+            ),
             "date": date_match.group(0) if date_match else None,
             "started": started,
             "age": age,
@@ -562,7 +582,9 @@ def parse_wastl_units(
         letters, keyword, level = split_keyword(alert_type)
         date_match = _DATE_DE_RE.search(stamp)
         incident = {
-            "id": make_id(source.get("id"), stamp, brigade_code or brigade, alert_type),
+            "id": make_id(
+                source.get("id"), _wastl_stamp(stamp), brigade_code or brigade, alert_type
+            ),
             "date": date_match.group(0) if date_match else None,
             "started": started,
             "age": age,
